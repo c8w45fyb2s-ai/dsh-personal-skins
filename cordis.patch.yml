@@ -1,0 +1,4 @@
+# Add the Host API provider to the active DSH composition.
+- insert:
+    - id: personal-skins
+      name: dsh-personal-skins

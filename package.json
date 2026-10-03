@@ -1,0 +1,54 @@
+{
+  "name": "dsh-personal-skins",
+  "version": "0.1.0",
+  "description": "Local image-based themes for DeepSeek Harness",
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/server/index.js",
+  "exports": {
+    ".": "./src/server/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "LICENSE",
+    "README.md",
+    "INSTALL.md",
+    "package.json",
+    "cordis.patch.yml",
+    "src/",
+    "lib/client.js",
+    "scripts/",
+    "preview/",
+    "tests/"
+  ],
+  "scripts": {
+    "build": "node scripts/build-client.mjs",
+    "check:package": "node scripts/check-package.mjs",
+    "test": "node --test",
+    "dev:preview": "node scripts/dev-server.mjs"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.0.4",
+    "@deepseek-ai/dsh": ">=0.2.0-rc.2 <0.3.0-0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh": {
+      "optional": true
+    }
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings"
+      ],
+      "external": [
+        "react"
+      ]
+    }
+  }
+}

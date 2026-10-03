@@ -1,0 +1,130 @@
+import {installRenderer} from '../src/client/renderer.js';
+
+const results=document.querySelector('#results');
+const failures=[];
+let skips=0;
+function assert(condition,message){
+  const item=document.createElement('li');
+  item.textContent=`${condition?'PASS':'FAIL'} · ${message}`;
+  item.style.color=condition?'#28784c':'#a12638';
+  results.append(item);
+  if(!condition)failures.push(message);
+}
+const supportsAppRegion=CSS.supports('-webkit-app-region','drag')&&CSS.supports('-webkit-app-region','initial');
+function assertAppRegion(condition,message){
+  if(!supportsAppRegion){
+    const item=document.createElement('li');
+    item.textContent=`SKIP · ${message} (browser does not support -webkit-app-region)`;
+    results.append(item);
+    skips++;
+    return;
+  }
+  assert(condition,message);
+}
+const appRegion=element=>getComputedStyle(element).getPropertyValue('-webkit-app-region').trim();
+const cssRgb=hex=>`rgb(${hex.slice(1).match(/../g).map(part=>parseInt(part,16)).join(', ')})`;
+const tick=()=>new Promise(resolve=>setTimeout(resolve,80));
+const html=document.documentElement;
+const viewArea=document.querySelector('.view-area');
+const baseSurfaces=[document.body,document.querySelector('.app-frame'),document.querySelector('.center-column'),document.querySelector('[data-slot="main"]'),viewArea];
+const panelSurfaces=[document.querySelector('.panel-one'),document.querySelector('.panel-two'),document.querySelector('[data-composer-card]')];
+const composer=document.querySelector('[data-composer-card]');
+const sidebar=document.querySelector('.sidebar');
+const header=document.querySelector('.ST7X_W_header');
+const sidebarColumn=document.querySelector('.sidebar-col');
+const message=document.querySelector('[data-chat-flow-key]');
+const originalSurface=`--dsw-alias-bg-base`;
+const originalSurfaceValue=getComputedStyle(document.body).getPropertyValue('--dsw-alias-bg-base').trim();
+const whitePixel='data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="8" height="8"%3E%3Crect width="8" height="8" fill="%23e9c6ce"/%3E%3C/svg%3E';
+const active={
+  id:'fixture',name:'Fixture',
+  light:{backgroundId:'bg',characterId:null},
+  dark:{backgroundId:null,characterId:null},
+  settings:{accent:'#D88F9E',backgroundX:50,backgroundY:50,backgroundScale:125,blur:2,overlay:.3,panelOpacity:.7,characterSide:'right',characterSize:35,characterOpacity:1,characterMirror:false},
+};
+const api={state:async()=>({schemaVersion:1,activePresetId:'fixture',presets:[active]}),assetUrl:async id=>id==='bg'?whitePixel:''};
+const renderer=installRenderer({api});
+
+await tick();
+const layer=document.querySelector('.dsh-skin-layer');
+assert(html.hasAttribute('data-dsh-skin-surface'),'active preset marks the surface on the document element');
+assert(baseSurfaces.every(element=>getComputedStyle(element).getPropertyValue('--dsw-alias-bg-base').trim()==='transparent'&&getComputedStyle(element).backgroundColor==='rgba(0, 0, 0, 0)'),'nested Darwin base surfaces paint transparent so the wallpaper shows through');
+const tint=layer.querySelector('.dsh-skin-surface');
+assert(Boolean(tint)&&getComputedStyle(tint).backgroundColor==='rgba(255, 255, 255, 0.12)','panel opacity tints the wallpaper exactly once');
+assert(panelSurfaces.every((element,index)=>getComputedStyle(element).backgroundColor===(index===2?'rgba(251, 244, 245, 0.82)':'rgba(253, 251, 251, 0.82)')),'local panels and composer retain their distinct accent-tinted translucent fills');
+assert(!document.querySelector('[data-dsh-skin-box="root"]'),'a display:contents slot anchor is never restyled');
+assert(layer?.parentElement===document.body,'decorative layer lives outside the host tree');
+assert(layer?.style.visibility==='visible'&&layer.querySelector('.dsh-skin-image').getAttribute('src')===whitePixel,'asset background renders in its own image layer');
+assert(Boolean(tint)&&tint.previousElementSibling?.classList.contains('dsh-skin-character')&&tint.previousElementSibling.previousElementSibling?.classList.contains('dsh-skin-shade'),'refined character paints above the tint while basic keeps original DOM order');
+assert(getComputedStyle(layer).zIndex==='-1','decoration sits behind content');
+assertAppRegion(appRegion(layer)==='none','full-window decoration resets the host direct-child no-drag rule to the app-region default');
+assertAppRegion(appRegion(document.querySelector('[data-window-drag]'))==='drag','host titlebar drag region remains draggable');
+assertAppRegion(appRegion(document.querySelector('.topbar button'))==='no-drag','interactive controls remain non-draggable');
+assert(composer.getAttribute('data-dsh-skin-box')==='composer','actual composer card is marked for accent and panel styling');
+assert(sidebar.getAttribute('data-dsh-skin-box')==='sidebar','actual sidebar box is marked');
+assert(message.getAttribute('data-dsh-skin-box')==='message','supported message row is marked');
+assert(header.getAttribute('data-dsh-skin-box')==='header','the real painted conversation header is marked as one box');
+assert(getComputedStyle(header).backgroundColor==='rgba(255, 255, 255, 0.94)','refined mode gives the full header one solid translucent skin fill');
+assert(getComputedStyle(header.querySelector('.ST7X_W_crumbCurrent')).color===cssRgb(getComputedStyle(html).getPropertyValue('--dsh-skin-header-ink').trim()),'current conversation title uses the local readable header ink');
+assert(getComputedStyle(header.querySelector('.ST7X_W_tab')).color===cssRgb(getComputedStyle(html).getPropertyValue('--dsh-skin-header-muted').trim()),'inactive conversation tab uses the local readable muted label');
+assert(getComputedStyle(header.querySelector('.ST7X_W_tabActive')).color===cssRgb(getComputedStyle(html).getPropertyValue('--dsh-skin-header-accent').trim()),'active conversation tab uses its contrast-checked header accent');
+assert(getComputedStyle(composer).getPropertyValue('--dsh-skin-accent').trim()==='#D88F9E','accent colour is projected onto the composer');
+assert(getComputedStyle(sidebar).backgroundColor==='rgba(0, 0, 0, 0)','transparent sidebar root avoids stacking a second translucent fill');
+assert(getComputedStyle(sidebarColumn).backgroundColor==='rgba(253, 248, 249, 0.82)','sidebar column gets the one accent-tinted sidebar fill');
+assert(getComputedStyle(sidebar.querySelector('._3WPZCG_newSession')).backgroundColor==='rgba(253, 248, 249, 0.82)','new-session action has its distinct toolbar surface');
+assert(getComputedStyle(sidebar.querySelector('[aria-current="page"]')).backgroundColor==='rgb(248, 235, 238)','selected chat row gets a clear accent surface');
+assert(getComputedStyle(composer.querySelector('.yhfFVG_row')).backgroundColor==='rgba(253, 248, 249, 0.82)','composer toolbar gets a distinct tinted surface');
+assert(getComputedStyle(composer.querySelector('.yhfFVG_primary')).backgroundColor!=='rgb(0, 0, 0)','send button receives the theme button fill');
+assert(document.querySelector('input[aria-label="Message input"]')?.getBoundingClientRect().height>0,'composer input remains present and interactive');
+
+html.className='dark';
+await tick();
+assert(Boolean(tint)&&getComputedStyle(tint).backgroundColor==='rgba(28, 28, 32, 0.12)','dark mode switches the wallpaper tint to a dark translucent fill');
+assert(panelSurfaces.every((element,index)=>getComputedStyle(element).backgroundColor===(index===2?'rgba(67, 53, 60, 0.82)':'rgba(37, 35, 40, 0.82)')),'dark mode keeps local panels and composer tinted and translucent');
+html.className='';
+html.style.colorScheme='';
+document.body.setAttribute('data-ds-dark-theme','');
+await tick();
+assert(Boolean(tint)&&getComputedStyle(tint).backgroundColor==='rgba(28, 28, 32, 0.12)','host dark-theme projection is observed');
+document.body.removeAttribute('data-ds-dark-theme');
+
+const replacement=composer.cloneNode(true);
+replacement.removeAttribute('data-dsh-skin-box');
+composer.replaceWith(replacement);
+await tick();
+assert(!composer.hasAttribute('data-dsh-skin-box'),'removed composer box has its owned marker restored');
+assert(replacement.getAttribute('data-dsh-skin-box')==='composer','replacement composer box receives the active skin');
+
+renderer.apply(null);
+await tick();
+assert(layer.style.visibility==='hidden','apply(null) hides all decorations');
+assert(!html.hasAttribute('data-dsh-skin-surface'),'apply(null) releases the surface marker');
+assert(getComputedStyle(document.body).getPropertyValue('--dsw-alias-bg-base').trim()===originalSurfaceValue,`apply(null) restores ${originalSurface}`);
+assert(getComputedStyle(viewArea).backgroundColor==='rgb(255, 255, 255)','nested base surfaces return to the host value');
+assert(getComputedStyle(document.querySelector('.panel-one')).backgroundColor==='rgb(240, 240, 240)','local panel token returns to the host value');
+assert(!replacement.hasAttribute('data-dsh-skin-box'),'apply(null) restores skin-owned box markers');
+assert(!header.hasAttribute('data-dsh-skin-box'),'apply(null) restores the header box marker');
+assert(!html.hasAttribute('data-dsh-skin-ui')&&!html.hasAttribute('data-dsh-skin-decorations'),'apply(null) restores UI mode markers');
+renderer.dispose();
+assert(!document.querySelector('.dsh-skin-layer'),'dispose removes the decorative layer');
+assertAppRegion(appRegion(document.querySelector('[data-window-drag]'))==='drag','disposing the skin leaves the host drag region unchanged');
+assertAppRegion(appRegion(document.querySelector('.topbar button'))==='no-drag','disposing the skin leaves control regions unchanged');
+assert(![...document.querySelectorAll('style')].some(node=>node.textContent.includes('data-dsh-skin-surface')),'dispose removes renderer CSS');
+
+let resolveSlow;
+const slowUrl=new Promise(resolve=>{resolveSlow=resolve;});
+const fastPixel='data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="8" height="8"%3E%3Crect width="8" height="8" fill="%2300ff00"/%3E%3C/svg%3E';
+const raceRenderer=installRenderer({api:{state:async()=>({presets:[]}),assetUrl:id=>id==='slow'?slowUrl:id==='fast'?Promise.resolve(fastPixel):Promise.resolve('')}});
+const raceLayer=document.querySelector('.dsh-skin-layer');
+const raceImage=raceLayer?.querySelector('.dsh-skin-image');
+raceRenderer.apply({...active,light:{backgroundId:'slow',characterId:null}});
+raceRenderer.apply({...active,light:{backgroundId:'fast',characterId:null}});
+await tick();
+assert(raceImage?.getAttribute('src')===fastPixel,'latest fast preset wins while an earlier asset lookup is pending');
+resolveSlow('data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="8" height="8"%3E%3Crect width="8" height="8" fill="%23ff0000"/%3E%3C/svg%3E');
+await tick();
+assert(raceImage?.getAttribute('src')===fastPixel,'stale slow asset cannot replace the latest preset image');
+raceRenderer.dispose();
+assert(!raceLayer?.isConnected,'dispose removes the race renderer layer');
+
+document.title=failures.length?`FAIL (${failures.length}) · Skin renderer browser checks`:skips?`PASS (${skips} SKIP) · Skin renderer browser checks`:'PASS · Skin renderer browser checks';

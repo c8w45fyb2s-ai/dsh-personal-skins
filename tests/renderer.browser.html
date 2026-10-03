@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN" data-platform="darwin" class="light" style="color-scheme: light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Skin renderer browser checks</title>
+  <style>
+    /* Mirrors DSH on Darwin: base is declared on body, and nested app surfaces consume it. */
+    html, body { height: 100%; margin: 0; font: 15px system-ui, sans-serif; }
+    body { --dsw-alias-bg-base: #ffffff; --dsw-alias-bg-layer-1: #f0f0f0; --dsw-alias-bg-layer-2: #fafafa; --dsw-alias-bg-layer-3: #eeeeee; background: var(--dsw-alias-bg-base); isolation: isolate; }
+    html[data-platform="darwin"], html[data-platform="darwin"] body { background: transparent; }
+    html[data-platform="darwin"] [data-window-drag] { -webkit-app-region: drag; }
+    html[data-platform="darwin"] [data-window-drag-recall] { -webkit-app-region: no-drag; }
+    html[data-platform="darwin"] body > :not(#root) { -webkit-app-region: no-drag; }
+    html[data-platform="darwin"] :is(button,a,input,select,textarea,summary,[contenteditable="true"],[tabindex],[role="dialog"],[role="button"],[role="textbox"]) { -webkit-app-region: no-drag; }
+    .app-frame { display: flex; height: 100%; background: var(--dsw-alias-bg-base); }
+    .topbar { height: 48px; flex: none; }
+    .ST7X_W_header { padding: 12px 24px; display: grid; gap: 8px; background: #fff; color: var(--dsw-alias-label-primary); border-bottom: 1px solid #ddd; }
+    .ST7X_W_titleRow { display: flex; justify-content: space-between; }
+    .ST7X_W_crumbCurrent { color: var(--dsw-alias-label-primary); }
+    .ST7X_W_tabs { display: flex; gap: 12px; }
+    .ST7X_W_tab { color: var(--dsw-alias-label-tertiary); }
+    .ST7X_W_tabActive { color: var(--dsw-alias-state-business-primary); border-bottom: 2px solid currentColor; }
+    [data-slot="sidebar"] { display: contents; } .sidebar-col { width: 180px; flex: none; background: var(--dsw-specific-sidebar-fill); } .sidebar { padding: 20px; background: color-mix(in srgb, #805b68 50%, transparent); }
+    .center-column { min-width: 0; flex: 1; display: flex; flex-direction: column; background: var(--dsw-alias-bg-base); }
+    [data-slot="main"] { min-height: 0; flex: 1; padding: 24px; overflow: auto; background: var(--dsw-alias-bg-base); }
+    /* DSH mounts slot anchors with display:contents; the actual conversation surface is nested below. */
+    [data-slot="conversation.view"] { display: contents; }
+    .view-area { min-height: 160px; padding: 16px; background: var(--dsw-alias-bg-base); }
+    .panel-one { margin-top: 12px; padding: 8px; background: var(--dsw-alias-bg-layer-1); }
+    .panel-two { padding: 8px; background: var(--dsw-alias-bg-layer-2); }
+    [data-slot="conversation.composer.bar"] { display: contents; } [data-composer-card] { margin: 12px 24px 20px; padding: 12px; background: var(--dsw-alias-bg-layer-3); }
+    #results { position: fixed; inset: auto 16px 16px 196px; max-height: 32vh; overflow: auto; padding: 12px; background: #fff; border: 1px solid #ddd; z-index: 5; }
+  </style>
+</head>
+<body>
+  <div id="root" class="app-frame" data-slot="root">
+    <div class="sidebar-col"><div data-slot="sidebar"><aside class="sidebar"><button class="_3WPZCG_newSession">New session</button><div class="_3WPZCG_panelRow _3WPZCG_panelActive" aria-current="page">Active chat</div><div class="_3WPZCG_panelRow" role="treeitem" aria-selected="true">Selected workspace</div></aside></div></div>
+    <div class="center-column">
+      <header class="topbar" data-window-drag><button type="button">Window button</button></header>
+      <section class="ST7X_W_header"><div class="ST7X_W_titleRow"><span class="ST7X_W_crumbCurrent">会话标题</span><span>操作</span></div><div class="ST7X_W_tabs" role="tablist" data-conversation-tabs><span class="ST7X_W_tab" role="tab" aria-selected="false">对话</span><span class="ST7X_W_tab ST7X_W_tabActive" role="tab" aria-selected="true">轨迹</span></div></section>
+      <main data-slot="main">
+        <h1>Renderer fixture</h1>
+        <div data-slot="conversation.view"><section class="view-area"><article data-chat-flow-key="fixture" data-chat-flow-kind="user">Chat messages stay above the decorative layer.</article></section></div>
+        <div class="panel-one">Layer 1 local panel</div>
+        <div class="panel-two">Layer 2 local panel</div>
+      </main>
+      <div data-composer-card><div data-slot="conversation.composer.bar"><input class="yhfFVG_input" aria-label="Message input" placeholder="Still clickable"><div class="yhfFVG_row"><button class="yhfFVG_primary">Send</button></div></div></div>
+    </div>
+  </div>
+  <ol id="results" aria-live="polite"></ol>
+  <script type="module" src="./renderer.browser.js"></script>
+</body>
+</html>
