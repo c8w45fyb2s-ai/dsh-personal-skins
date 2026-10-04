@@ -77,10 +77,30 @@ assert(getComputedStyle(composer.querySelector('.yhfFVG_row')).backgroundColor==
 assert(getComputedStyle(composer.querySelector('.yhfFVG_primary')).backgroundColor!=='rgb(0, 0, 0)','send button receives the theme button fill');
 assert(document.querySelector('input[aria-label="Message input"]')?.getBoundingClientRect().height>0,'composer input remains present and interactive');
 
+// Mount the two host page shapes after skin activation: page navigation should
+// receive scoped styles immediately without waiting for a slot rescan.
+const pages=document.createElement('div');
+pages.innerHTML=`<section data-plugin-panel><header><div><h1>插件</h1><div style="color:var(--dsw-alias-label-secondary)">安装、启用和配置插件</div></div></header><section data-plugin-group="official"><h3>官方</h3><ul><li style="color:var(--dsw-alias-label-secondary)">插件说明</li></ul></section></section>
+<div data-testid="task-manager-page"><div class="CxUija_filterTabs"><button class="CxUija_filterTab CxUija_filterTabActive" aria-pressed="true">全部</button><button class="CxUija_filterTab" aria-pressed="false">已开启</button></div><div class="CxUija_searchField"><input aria-label="Search tasks" placeholder="搜索自动化任务"></div><div class="CxUija_empty" role="status" style="color:var(--dsw-alias-label-tertiary)">还没有自动化任务</div><ul class="CxUija_listRows"><li>任务列表</li></ul></div>`;
+document.querySelector('[data-slot="main"]').append(pages);
+const localBoxes=[pages.querySelector('[data-plugin-panel] > header > div'),pages.querySelector('[data-plugin-group]'),...pages.querySelectorAll('.CxUija_filterTabs,.CxUija_searchField,.CxUija_empty,.CxUija_listRows')];
+const search=pages.querySelector('input');
+assert(localBoxes.every(el=>getComputedStyle(el).backgroundColor==='rgba(255, 255, 255, 0.85)'),'new plugin and task page regions receive one readable light surface');
+assert(getComputedStyle(pages.querySelector('li')).color==='rgb(83, 80, 88)','plugin descriptions inherit the scoped readable secondary color');
+assert(getComputedStyle(search,'::placeholder').color==='rgb(83, 80, 88)'&&getComputedStyle(search,'::placeholder').opacity==='1','task search placeholder remains readable without an extra opacity reduction');
+assert(getComputedStyle(pages.querySelector('.CxUija_filterTabActive')).backgroundColor!==getComputedStyle(pages.querySelector('.CxUija_filterTab:not(.CxUija_filterTabActive)')).backgroundColor,'task selected tab remains visibly distinct');
+
 html.className='dark';
 await tick();
 assert(Boolean(tint)&&getComputedStyle(tint).backgroundColor==='rgba(28, 28, 32, 0.12)','dark mode switches the wallpaper tint to a dark translucent fill');
 assert(panelSurfaces.every((element,index)=>getComputedStyle(element).backgroundColor===(index===2?'rgba(67, 53, 60, 0.82)':'rgba(37, 35, 40, 0.82)')),'dark mode keeps local panels and composer tinted and translucent');
+assert(localBoxes.every(el=>getComputedStyle(el).backgroundColor==='rgba(20, 18, 24, 0.85)'),'dark page surfaces cover bright wallpaper locally');
+assert(getComputedStyle(pages.querySelector('li')).color==='rgb(224, 221, 227)','dark plugin descriptions use brighter secondary text');
+renderer.apply({...active,settings:{...active.settings,uiStyle:'basic'}});
+await tick();
+assert(localBoxes.every(el=>getComputedStyle(el).backgroundColor==='rgba(20, 18, 24, 0.85)'),'basic skins retain page readability without refined decorations');
+renderer.apply(active);
+await tick();
 html.className='';
 html.style.colorScheme='';
 document.body.setAttribute('data-ds-dark-theme','');
@@ -105,6 +125,9 @@ assert(getComputedStyle(document.querySelector('.panel-one')).backgroundColor===
 assert(!replacement.hasAttribute('data-dsh-skin-box'),'apply(null) restores skin-owned box markers');
 assert(!header.hasAttribute('data-dsh-skin-box'),'apply(null) restores the header box marker');
 assert(!html.hasAttribute('data-dsh-skin-ui')&&!html.hasAttribute('data-dsh-skin-decorations'),'apply(null) restores UI mode markers');
+assert(localBoxes.every(el=>getComputedStyle(el).backgroundColor==='rgba(0, 0, 0, 0)'),'disabling the skin removes all page readability surfaces');
+assert(getComputedStyle(search,'::placeholder').color!=='rgb(83, 80, 88)','disabling the skin restores the native placeholder style');
+pages.remove();
 renderer.dispose();
 assert(!document.querySelector('.dsh-skin-layer'),'dispose removes the decorative layer');
 assertAppRegion(appRegion(document.querySelector('[data-window-drag]'))==='drag','disposing the skin leaves the host drag region unchanged');

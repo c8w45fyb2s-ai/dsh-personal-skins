@@ -33,10 +33,64 @@ const DECORATIONS = 'data-dsh-skin-decorations';
 const BOX_ATTRIBUTE = 'data-dsh-skin-box';
 const LIGHT_SURFACE = '255,255,255';
 const DARK_SURFACE = '28,28,32';
+const READABILITY_VARS = ['fill', 'ink', 'muted', 'hover', 'selected', 'border'].map(key => `--dsh-skin-page-${key}`);
 
 const CSS = `
 html[${SURFACE_ATTRIBUTE}] body {
   ${BASE_TOKEN}: transparent !important;
+}
+/* Verified DSH 0.2.x plugin page anchors; only these local boxes cover the wallpaper. */
+html[${SURFACE_ATTRIBUTE}] [data-plugin-panel],
+html[${SURFACE_ATTRIBUTE}] [data-testid="task-manager-page"] {
+  --dsw-alias-label-primary: var(--dsh-skin-page-ink) !important;
+  --dsw-alias-label-secondary: var(--dsh-skin-page-muted) !important;
+  --dsw-alias-label-tertiary: var(--dsh-skin-page-muted) !important;
+  --dsw-alias-label-caption: var(--dsh-skin-page-muted) !important;
+  --dsw-alias-interactive-bg-hover: var(--dsh-skin-page-hover) !important;
+  --dsw-alias-interactive-bg-active: var(--dsh-skin-page-selected) !important;
+  --dsw-alias-border-l2: var(--dsh-skin-page-border) !important;
+  --dsw-alias-border-l3: var(--dsh-skin-page-border) !important;
+}
+html[${SURFACE_ATTRIBUTE}] [data-plugin-panel] > header > div:first-child,
+html[${SURFACE_ATTRIBUTE}] [data-plugin-panel] [data-plugin-group],
+html[${SURFACE_ATTRIBUTE}] [data-plugin-panel] .ZVcBiW_empty {
+  background-color: var(--dsh-skin-page-fill) !important;
+  border-radius: 14px;
+  padding: 16px;
+}
+html[${SURFACE_ATTRIBUTE}] [data-plugin-panel] [data-plugin-group] > ul {
+  margin-bottom: 0;
+}
+/* TaskManagerPage.module.css classes verified in the same host bundle. */
+html[${SURFACE_ATTRIBUTE}] [data-testid="task-manager-page"] .CxUija_filterTabs,
+html[${SURFACE_ATTRIBUTE}] [data-testid="task-manager-page"] .CxUija_searchField,
+html[${SURFACE_ATTRIBUTE}] [data-testid="task-manager-page"] .CxUija_listRows,
+html[${SURFACE_ATTRIBUTE}] [data-testid="task-manager-page"] .CxUija_empty {
+  background-color: var(--dsh-skin-page-fill) !important;
+  border-radius: 14px;
+}
+html[${SURFACE_ATTRIBUTE}] [data-testid="task-manager-page"] .CxUija_filterTabs { padding: 6px; }
+html[${SURFACE_ATTRIBUTE}] [data-testid="task-manager-page"] .CxUija_filterTab {
+  color: var(--dsh-skin-page-muted) !important;
+}
+html[${SURFACE_ATTRIBUTE}] [data-testid="task-manager-page"] .CxUija_filterTabActive {
+  color: var(--dsh-skin-page-ink) !important;
+  background-color: var(--dsh-skin-page-selected) !important;
+}
+html[${SURFACE_ATTRIBUTE}] [data-testid="task-manager-page"] .CxUija_searchField input {
+  color: var(--dsh-skin-page-ink) !important;
+  caret-color: var(--dsh-skin-page-ink);
+}
+html[${SURFACE_ATTRIBUTE}] [data-testid="task-manager-page"] .CxUija_searchField input::placeholder {
+  color: var(--dsh-skin-page-muted) !important;
+  opacity: 1;
+}
+html[${SURFACE_ATTRIBUTE}] [data-testid="task-manager-page"] .CxUija_empty {
+  width: fit-content;
+  max-width: 100%;
+  box-sizing: border-box;
+  margin: 24px auto;
+  padding: 32px;
 }
 html[${SURFACE_ATTRIBUTE}][${UI_STYLE}="refined"] body {
 ${PANEL_TOKENS.map(token => `  ${token}: var(${PANEL_VALUE}) !important;`).join('\n')}
@@ -214,6 +268,12 @@ function getUiTheme(settings = {}, dark = false) {
     line: basic ? `rgba(${rgb.join(',')},.22)` : `rgba(${rgb.join(',')},.5)`, border: basic ? `rgba(${rgb.join(',')},.34)` : `rgba(${rgb.join(',')},.6)`,
     ink: dark ? '#f5f2f3' : '#29272a', muted: dark ? '#b9b4bc' : '#716c73', soft: dark ? '#252329' : '#f8f5f6',
     headerFill, headerInk: dark ? '#f5f2f3' : '#29272a', headerMuted: dark ? '#ded9df' : '#535058', headerAccent,
+    // Local page surfaces must remain readable even over a white/black wallpaper,
+    // including in basic mode, which leaves the host's other controls untouched.
+    pageFill: dark ? 'rgba(20,18,24,0.85)' : 'rgba(255,255,255,0.85)',
+    pageInk: dark ? '#f5f2f3' : '#29272a', pageMuted: dark ? '#e0dde3' : '#535058',
+    pageHover: dark ? '#35323b' : '#eeeaf0', pageSelected: dark ? '#48414f' : '#e2dce8',
+    pageBorder: dark ? 'rgba(224,221,227,0.35)' : 'rgba(83,80,88,0.35)',
     accent, brand: `#${brandRgb.map(v=>v.toString(16).padStart(2,'0')).join('')}`, button, buttonHover, hover:`rgba(${rgb.join(',')},.12)`, buttonText:'#FFFFFF',
   };
 }
@@ -251,6 +311,8 @@ export function installRenderer({
   const originalUiStyle = html.getAttribute(UI_STYLE);
   const originalDecorations = html.getAttribute(DECORATIONS);
   const originalUiVars = ['--dsh-skin-box-fill','--dsh-skin-sidebar-fill','--dsh-skin-message-fill','--dsh-skin-toolbar','--dsh-skin-selected','--dsh-skin-box-line','--dsh-skin-box-radius','--dsh-skin-message-ink','--dsh-skin-border','--dsh-skin-ink','--dsh-skin-muted','--dsh-skin-soft','--dsh-skin-brand','--dsh-skin-button','--dsh-skin-button-hover','--dsh-skin-hover','--dsh-skin-button-text','--dsh-skin-header-fill','--dsh-skin-header-ink','--dsh-skin-header-muted','--dsh-skin-header-accent'].map(name => [name, html.style.getPropertyValue(name)]);
+  const originalReadabilityVars = new Map(READABILITY_VARS.map(name => [name, html.style.getPropertyValue(name)]));
+  const writtenReadabilityVars = new Map();
 
   let preset = null;
   let disposed = false;
@@ -299,6 +361,22 @@ export function installRenderer({
       restoreStyleValue(html, name, original, written);
       writtenUiVars.delete(name);
     }
+  }
+
+  function applyReadability(theme) {
+    for (const key of ['fill', 'ink', 'muted', 'hover', 'selected', 'border']) {
+      const name = `--dsh-skin-page-${key}`;
+      const value = theme[`page${key[0].toUpperCase()}${key.slice(1)}`];
+      setStyleValue(html, name, value);
+      writtenReadabilityVars.set(name, value);
+    }
+  }
+
+  function releaseReadability() {
+    for (const [name, written] of writtenReadabilityVars) {
+      restoreStyleValue(html, name, originalReadabilityVars.get(name), written);
+    }
+    writtenReadabilityVars.clear();
   }
 
   async function assetUrl(id) {
@@ -435,6 +513,7 @@ export function installRenderer({
   }
 
   function releaseSurface() {
+    releaseReadability();
     restoreOwnedAttr(SURFACE_ATTRIBUTE, originalSurfaceAttribute);
     /* Leave a value someone else wrote after us alone. */
     if (writtenSurface !== originalSurfaceValue && html.style.getPropertyValue(SURFACE_VALUE) === writtenSurface) {
@@ -484,6 +563,7 @@ export function installRenderer({
     const opacity = clamp(settings.panelOpacity ?? 0.6, 0, 1, 0.6);
     const palette = getUiTheme({...settings, panelOpacity: opacity}, dark);
     applySurface(palette, refined, settings.decorations !== false);
+    applyReadability(palette);
     syncSlots(refined ? activeSlots() : new Map());
     syncLegacyComposer(settings.accent, refined);
 

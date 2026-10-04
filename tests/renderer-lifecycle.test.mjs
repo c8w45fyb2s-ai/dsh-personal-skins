@@ -142,6 +142,71 @@ test('style observer reaches a stable RAF and does not repeatedly rewrite UI var
   renderer.dispose();
 });
 
+test('readability variables are leased in both modes and preserve later host writes',async t=>{
+  const previous=globalThis.MutationObserver;globalThis.MutationObserver=FakeObserver;FakeObserver.all=[];
+  t.after(()=>{globalThis.MutationObserver=previous});
+  const {doc,win,frames}=setup();
+  const html=doc.documentElement;
+  const names=['fill','ink','muted','hover','selected','border'].map(key=>`--dsh-skin-page-${key}`);
+  for(const [i,name] of names.entries())html.style.setProperty(name,`host-${i}`);
+  const original=names.map(name=>html.style.getPropertyValue(name));
+  const renderer=installRenderer({api:{state:async()=>({presets:[]}),assetUrl:async()=>''},document:doc,window:win});
+  const basicWithWallpaper={...preset('basic'),light:{backgroundId:'wallpaper',characterId:null}};
+  renderer.apply(basicWithWallpaper);await drain(frames);
+  const light=renderer.getUiTheme(preset('basic').settings,false);
+  for(const key of ['fill','ink','muted','hover','selected','border'])assert.equal(html.style.getPropertyValue(`--dsh-skin-page-${key}`),light[`page${key[0].toUpperCase()}${key.slice(1)}`]);
+  renderer.apply(preset('refined'));await drain(frames);
+  const refined=renderer.getUiTheme(preset('refined').settings,false);
+  for(const key of ['fill','ink','muted','hover','selected','border'])assert.equal(html.style.getPropertyValue(`--dsh-skin-page-${key}`),refined[`page${key[0].toUpperCase()}${key.slice(1)}`]);
+  const darkPreset={...preset('refined'),dark:{backgroundId:'wallpaper',characterId:null}};
+  // The renderer follows the host color scheme; change it before applying the dark palette.
+  doc.documentElement.className='dark';
+  renderer.apply(darkPreset);await drain(frames);
+  const dark=renderer.getUiTheme(preset('refined').settings,true);
+  for(const key of ['fill','ink','muted','hover','selected','border'])assert.equal(html.style.getPropertyValue(`--dsh-skin-page-${key}`),dark[`page${key[0].toUpperCase()}${key.slice(1)}`]);
+  renderer.apply(null);await drain(frames);
+  assert.deepEqual(names.map(name=>html.style.getPropertyValue(name)),original);
+
+  renderer.apply(basicWithWallpaper);await drain(frames);
+  assert.notEqual(html.style.getPropertyValue(names[0]),original[0],'basic mode with a wallpaper acquires readability variables before the host write');
+  html.style.setProperty(names[0],'host-later-write');
+  renderer.dispose();
+  assert.equal(html.style.getPropertyValue(names[0]),'host-later-write','dispose preserves a host value written after the skin acquired its lease');
+  assert.deepEqual(names.slice(1).map(name=>html.style.getPropertyValue(name)),original.slice(1));
+});
+
+test('readability observer stabilizes in basic mode with a wallpaper',async t=>{
+  const previous=globalThis.MutationObserver;globalThis.MutationObserver=FakeObserver;FakeObserver.all=[];
+  t.after(()=>{globalThis.MutationObserver=previous});
+  const {doc,win,frames}=setup();
+  const renderer=installRenderer({api:{state:async()=>({presets:[]}),assetUrl:async id=>id?'wallpaper-url':''},document:doc,window:win});
+  renderer.apply({...preset('basic'),light:{backgroundId:'wallpaper',characterId:null}});await drain(frames);
+  const observer=FakeObserver.all.find(item=>item.target===doc.documentElement);
+  const writes=doc.documentElement.style.writes;
+  observer.trigger([{type:'attributes',target:doc.documentElement,attributeName:'style'}]);
+  await drain(frames);
+  assert.equal(frames.length,0);
+  assert.equal(doc.documentElement.style.writes,writes,'basic mode page variables do not continuously rewrite observed inline styles');
+  renderer.dispose();
+});
+
+test('readability text remains above 4.5:1 over worst-case wallpaper colors',()=>{
+  const luminance=rgb=>rgb.map(value=>{const c=value/255;return c<=.04045?c/12.92:((c+.055)/1.055)**2.4}).reduce((sum,value,index)=>sum+value*[.2126,.7152,.0722][index],0);
+  const hexRgb=value=>value.slice(1).match(/../g).map(part=>parseInt(part,16));
+  const rgba=value=>{const parts=value.match(/[\d.]+/g).map(Number);return {rgb:parts.slice(0,3),alpha:parts[3]}};
+  const composite=(front,back)=>front.rgb.map((value,index)=>value*front.alpha+back[index]*(1-front.alpha));
+  const ratio=(a,b)=>{const hi=Math.max(a,b),lo=Math.min(a,b);return (hi+.05)/(lo+.05)};
+  for(const dark of [false,true]){
+    const theme=installRenderer.getUiTheme({accent:'#D88F9E',uiStyle:'basic'},dark);
+    const surface=rgba(theme.pageFill);
+    const backdrop=dark?[255,255,255]:[0,0,0];
+    const finalSurface=composite(surface,backdrop);
+    for(const key of ['pageInk','pageMuted']){
+      assert.ok(ratio(luminance(hexRgb(theme[key])),luminance(finalSurface))>=4.5,`${dark?'dark':'light'} ${key} meets 4.5:1 over the worst-case wallpaper`);
+    }
+  }
+});
+
 test('palette keeps the actual white button text and brand labels above 4.5:1 contrast',()=>{
   const luminance=hex=>hex.slice(1).match(/../g).map(part=>parseInt(part,16)).map(value=>{const c=value/255;return c<=.04045?c/12.92:((c+.055)/1.055)**2.4}).reduce((sum,value,index)=>sum+value*[.2126,.7152,.0722][index],0);
   const ratio=(a,b)=>{const hi=Math.max(a,b),lo=Math.min(a,b);return (hi+.05)/(lo+.05)};
