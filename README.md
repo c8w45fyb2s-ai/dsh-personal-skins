@@ -1,6 +1,6 @@
 # dsh-personal-skins
 
-为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 添加自定义背景图和透明立绘，保存多套皮肤并随时切换。支持 DSH 0.2 系列（从 0.2.0-rc.2 起）。
+为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 添加自定义背景图和透明立绘，保存多套皮肤并随时切换。支持 DSH 0.2.0-rc.2 版本。
 
 ## 安装
 
