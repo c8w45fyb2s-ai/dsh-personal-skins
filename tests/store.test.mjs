@@ -4,7 +4,7 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createStore } from '../src/server/store.js';
-import { createDefaultProfile, validateProfile } from '../src/shared/model.js';
+import { createDefaultProfile, DEFAULT_SETTINGS, validateProfile } from '../src/shared/model.js';
 
 async function fixture(t) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'dsh-store-'));
@@ -55,6 +55,30 @@ test('validates ranges, rejects corrupt profile without overwriting it', async t
   assert.equal(await readFile(path.join(dir,'profile.json'),'utf8'),corrupt);
 });
 
+test('profile validation shares one-sided image references while retaining explicit mode differences',()=>{
+  const profile=createDefaultProfile();
+  // Start from a complete valid preset record without depending on random IDs.
+  const base={id:'images',name:'Images',light:{backgroundId:null,characterId:null},dark:{backgroundId:null,characterId:null},settings:{...DEFAULT_SETTINGS}};
+  profile.presets=[base];
+  const lightBackground='a'.repeat(64)+'.png';
+  const darkCharacter='b'.repeat(64)+'.webp';
+  base.light.backgroundId=lightBackground;
+  base.dark.characterId=darkCharacter;
+  let normalized=validateProfile(profile).presets[0];
+  assert.equal(normalized.light.backgroundId,lightBackground);
+  assert.equal(normalized.dark.backgroundId,lightBackground,'a light-only background is shared into dark mode');
+  assert.equal(normalized.light.characterId,darkCharacter,'a dark-only character is shared into light mode');
+  assert.equal(normalized.dark.characterId,darkCharacter);
+
+  base.dark.backgroundId='c'.repeat(64)+'.jpg';
+  base.light.characterId='d'.repeat(64)+'.png';
+  normalized=validateProfile(profile).presets[0];
+  assert.equal(normalized.light.backgroundId,lightBackground);
+  assert.equal(normalized.dark.backgroundId,'c'.repeat(64)+'.jpg','two explicit nonnull background IDs remain distinct');
+  assert.equal(normalized.light.characterId,'d'.repeat(64)+'.png','two explicit nonnull character IDs remain distinct');
+  assert.equal(normalized.dark.characterId,darkCharacter);
+});
+
 test('legacy profiles default UI options and persist validated choices', async t => {
   const {dir, store}=await fixture(t);
   const legacy=createDefaultProfile();
@@ -84,6 +108,37 @@ test('imports content-addressed image, rejects malformed/oversize data and preve
   await assert.rejects(store.importAsset(Buffer.alloc(10*1024*1024+1)),/10 MiB/);
   await assert.rejects(store.readAsset('../profile.json'),/invalid asset id/);
   assert.equal((await readdir(path.join((await import('node:os')).tmpdir()))).includes('profile.json'),false);
+});
+
+test('single-mode image updates share each explicit field, null removes both, and conflicts do not save',async t=>{
+  const {dir,store}=await fixture(t);
+  const background=await store.importAsset(png(2,1));
+  const portrait=await store.importAsset(png(3,1));
+  const otherBackground=await store.importAsset(jpeg(1,2));
+  const preset=(await store.createPreset('Shared images')).presets[0];
+
+  let state=await store.updatePreset(preset.id,{light:{backgroundId:background.id,characterId:portrait.id}});
+  assert.equal(state.presets[0].light.backgroundId,background.id);
+  assert.equal(state.presets[0].dark.backgroundId,background.id,'a background upload in either mode is shared');
+  assert.equal(state.presets[0].light.characterId,portrait.id);
+  assert.equal(state.presets[0].dark.characterId,portrait.id,'a character upload in either mode is shared');
+
+  state=await store.updatePreset(preset.id,{dark:{backgroundId:null,characterId:null}});
+  assert.equal(state.presets[0].light.backgroundId,null,'removing the background clears both modes');
+  assert.equal(state.presets[0].dark.backgroundId,null);
+  assert.equal(state.presets[0].light.characterId,null,'removing the character clears both modes');
+  assert.equal(state.presets[0].dark.characterId,null);
+
+  state=await store.updatePreset(preset.id,{dark:{backgroundId:background.id}});
+  assert.equal(state.presets[0].light.backgroundId,background.id);
+  const file=path.join(dir,'profile.json');
+  const before=await readFile(file,'utf8');
+  await assert.rejects(store.updatePreset(preset.id,{
+    light:{backgroundId:background.id},
+    dark:{backgroundId:otherBackground.id},
+  }));
+  assert.equal(await readFile(file,'utf8'),before,'a conflicting dual-mode patch is rejected before persistence');
+  assert.deepEqual(await store.read(),state,'the rejected patch leaves the stored profile unchanged');
 });
 
 test('recognizes JPEG, PNG and WebP bytes and preserves shared assets after preset deletion', async t => {

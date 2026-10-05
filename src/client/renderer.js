@@ -554,8 +554,9 @@ export function installRenderer({
     const dark = isDark(doc, media);
     const refined = settings.uiStyle !== 'basic';
     const theme = dark ? preset.dark : preset.light;
-    const backgroundId = theme?.backgroundId || (dark ? preset.light?.backgroundId : null);
-    const characterId = theme?.characterId || (dark ? preset.light?.characterId : null);
+    const otherTheme = dark ? preset.light : preset.dark;
+    const backgroundId = theme?.backgroundId || otherTheme?.backgroundId;
+    const characterId = theme?.characterId || otherTheme?.characterId;
     if (!refined && !backgroundId && !characterId) {
       clearSkin();
       return;

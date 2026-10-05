@@ -123,6 +123,18 @@ export function createStore(directory) {
           else if (patch[key] && typeof patch[key] === 'object' && !Array.isArray(patch[key])) item[key] = { ...item[key], ...patch[key] };
           else throw new TypeError(`${key} patch must be an object`);
         }
+        for (const key of ['backgroundId', 'characterId']) {
+          const lightChanged = patch.light && Object.hasOwn(patch.light, key);
+          const darkChanged = patch.dark && Object.hasOwn(patch.dark, key);
+          if (lightChanged && darkChanged && patch.light[key] !== patch.dark[key]) {
+            throw new TypeError(`${key}: choose one image for both modes`);
+          }
+          if (lightChanged || darkChanged) {
+            const assetId = lightChanged ? patch.light[key] : patch.dark[key];
+            item.light[key] = assetId;
+            item.dark[key] = assetId;
+          }
+        }
         return p;
       });
     },

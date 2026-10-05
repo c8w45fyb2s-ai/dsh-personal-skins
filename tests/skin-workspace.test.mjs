@@ -41,6 +41,8 @@ class FakeElement {
     return data;
   }
   get id() { return this.getAttribute('id') || ''; }
+  get src() { return this.getAttribute('src') ?? undefined; }
+  set src(value) { this.setAttribute('src', value); }
   get type() { return this.getAttribute('type') || ''; }
   get value() { return this._value ?? this.getAttribute('value') ?? ''; }
   set value(value) { this._value = String(value); }
@@ -342,7 +344,7 @@ test('image cards use keyboard-accessible chooser buttons and reject a confirmed
   assert.equal(backgroundInput.getAttribute('tabindex'), '-1');
   assert.equal(root.querySelector('[data-action="clear"][data-kind="background"]').textContent, '移除图片');
   assert.equal(root.querySelector('.dsh-upload-thumb img').src, 'blob:saved-background', 'an existing image is shown as the thumbnail');
-  assert.equal(root.querySelector('[data-action="clear"][data-kind="character"]'), null);
+  assert.ok(root.querySelector('[data-action="clear"][data-kind="character"]'), 'a dark-only legacy character is also available in light mode');
   const chooseBackground = root.querySelector('[data-action="choose-upload"][data-kind="background"]');
   assert.equal(chooseBackground.getAttribute('type'), 'button');
   assert.equal(chooseBackground.textContent, '选择背景图片');
@@ -364,7 +366,7 @@ test('image cards use keyboard-accessible chooser buttons and reject a confirmed
   dispose();
 });
 
-test('image upload progress, thumbnails, and removal stay isolated by mode', async () => {
+test('image upload, thumbnails, failed replacements, and removal share assets across modes', async () => {
   const doc = new FakeDocument();
   const container = makeContainer(doc);
   const profile = preset();
@@ -373,6 +375,7 @@ test('image upload progress, thumbnails, and removal stay isolated by mode', asy
   let resolveUpload;
   let uploadedFile = null;
   let failNextUpload = false;
+  let savedPatch;
   const previousImage = globalThis.Image;
   const previousCreateObjectURL = URL.createObjectURL;
   const previousRevokeObjectURL = URL.revokeObjectURL;
@@ -393,6 +396,7 @@ test('image upload progress, thumbnails, and removal stay isolated by mode', asy
         state: async () => ({presets: [profile], activePresetId: null}),
         assetUrl: async (id) => `blob:${id}`,
         onState: () => () => {},
+        update: async (id, patch) => { savedPatch = patch; return {presets:[{...patch,id}],activePresetId:null}; },
         upload: (file) => {
           if (failNextUpload) { failNextUpload = false; throw new Error('Unsupported image content type or signature'); }
           uploadedFile = file;
@@ -407,9 +411,12 @@ test('image upload progress, thumbnails, and removal stay isolated by mode', asy
     await root.querySelector('[data-action="edit"]').dispatch('click');
     root = container.firstElementChild;
     assert.equal(root.querySelector('[data-upload-state="background"]').textContent, '已设置背景图片');
+    assert.equal(root.querySelector('[data-upload-state="character"]').textContent, '已设置立绘图片', 'a legacy dark-only portrait is shared into light');
+    assert.doesNotMatch(root.innerHTML, /浅色与深色共用/);
     await root.querySelector('[data-mode="dark"]').dispatch('click');
     root = container.firstElementChild;
     assert.equal(root.querySelector('[data-upload-state="character"]').textContent, '已设置立绘图片');
+    assert.equal(root.querySelector('[data-upload-card="background"] .dsh-upload-thumb img').src, 'blob:saved-background', 'dark mode shows the shared background thumbnail');
     assert.equal(root.querySelector('[data-upload-card="character"] h4').textContent, '透明立绘');
     assert.equal(root.querySelector('[data-action="choose-upload"][data-kind="character"]').textContent, '选择立绘图片');
     assert.doesNotMatch(root.querySelector('.dsh-upload-limit').textContent, /透明|背景透明/);
@@ -423,7 +430,7 @@ test('image upload progress, thumbnails, and removal stay isolated by mode', asy
     assert.equal(uploadedFile, file, 'the original File passes through the existing upload method');
     assert.equal(root.querySelector('[data-upload-state="character"]').textContent, '正在上传：立绘.png');
     assert.equal(root.querySelector('[data-action="choose-upload"][data-kind="character"]').disabled, true, 'uploads cannot be started twice');
-    assert.equal(root.querySelector('.dsh-upload-thumb img').src, 'blob:pending-image');
+    assert.equal(root.querySelector('[data-upload-card="character"] .dsh-upload-thumb img').src, 'blob:pending-image');
     resolveUpload({id: 'new-character'});
     await pending;
     await flush();
@@ -450,19 +457,88 @@ test('image upload progress, thumbnails, and removal stay isolated by mode', asy
     await root.querySelector('[data-mode="light"]').dispatch('click');
     root = container.firstElementChild;
     assert.match(root.querySelector('[data-upload-state="background"]').textContent, /已设置背景图片/);
+    await flush();
+    assert.equal(root.querySelector('[data-upload-card="character"] .dsh-upload-thumb img').src, 'blob:new-character', 'replacement from dark mode also appears in light');
     await root.querySelector('[data-action="clear"][data-kind="background"]').dispatch('click');
     root = container.firstElementChild;
     assert.equal(root.querySelector('[data-action="clear"][data-kind="background"]'), null);
     assert.equal(root.querySelector('[data-upload-state="background"]').textContent, '尚未选择背景图片');
-    assert.equal(root.querySelector('[data-action="clear"][data-kind="character"]'), null, 'the other mode is not accidentally changed');
+    assert.ok(root.querySelector('[data-action="clear"][data-kind="character"]'), 'removing the background preserves the shared character');
     assert.equal(doc.activeElement.dataset.action, 'choose-upload', 'focus returns to the chooser after image removal');
     assert.equal(doc.activeElement.dataset.mode, 'light');
+    await root.querySelector('[data-mode="dark"]').dispatch('click');
+    await flush();
+    assert.equal(root.querySelector('[data-upload-state="background"]').textContent, '尚未选择背景图片', 'removal clears both modes');
+    assert.equal(root.querySelector('.dsh-preview-bg').src, undefined, 'removed background no longer falls back to another mode');
+    await root.querySelector('[data-action="save"]').dispatch('click');
+    assert.equal(savedPatch.light.backgroundId, null);
+    assert.equal(savedPatch.dark.backgroundId, null);
+    assert.equal(savedPatch.light.characterId, 'new-character');
+    assert.equal(savedPatch.dark.characterId, 'new-character');
     dispose();
   } finally {
     globalThis.Image = previousImage;
     URL.createObjectURL = previousCreateObjectURL;
     URL.revokeObjectURL = previousRevokeObjectURL;
   }
+});
+
+test('legacy image conflicts preserve both originals until an explicit choice and block saving unresolved assets', async () => {
+  const doc = new FakeDocument(), container = makeContainer(doc), original = preset();
+  original.light = {backgroundId:'light-background',characterId:'light-character'};
+  original.dark = {backgroundId:'dark-background',characterId:'dark-character'};
+  let updates = 0, saved;
+  const dispose = mountEditor(container, {standalone:true,api:{
+    state:async()=>({presets:[original],activePresetId:null}), assetUrl:async id=>`blob:${id}`,
+    update:async(id,patch)=>{updates++;saved=patch;return {presets:[{...patch,id}],activePresetId:null};},
+  }});
+  await flush();
+  const root = container.firstElementChild;
+  await root.querySelector('[data-action="edit"]').dispatch('click');
+  await flush();
+  assert.equal(root.querySelectorAll('.dsh-image-conflict').length,2);
+  assert.deepEqual(root.querySelectorAll('[data-legacy-image]').map(image=>image.src), ['blob:light-background','blob:dark-background','blob:light-character','blob:dark-character']);
+  await root.querySelector('[data-action="save"]').dispatch('click');
+  assert.equal(updates,0,'conflicting images cannot be silently overwritten by save');
+  assert.match(root.querySelector('.dsh-notice').textContent,/请先选择要保留的图片/);
+  await root.querySelector('[data-action="retain-image"][data-kind="background"][data-source="dark"]').dispatch('click');
+  await flush();
+  assert.equal(root.querySelector('[data-upload-card="background"] .dsh-upload-thumb img').src,'blob:dark-background');
+  await root.querySelector('[data-action="save"]').dispatch('click');
+  assert.equal(updates,0,'the remaining character conflict also needs an explicit choice');
+  await root.querySelector('[data-action="retain-image"][data-kind="character"][data-source="light"]').dispatch('click');
+  await root.querySelector('[data-mode="dark"]').dispatch('click');
+  await flush();
+  assert.equal(root.querySelectorAll('.dsh-image-conflict').length,0);
+  assert.equal(root.querySelector('[data-upload-card="character"] .dsh-upload-thumb img').src,'blob:light-character');
+  assert.equal(original.light.backgroundId,'light-background','editing preserves the saved originals');
+  assert.equal(original.dark.characterId,'dark-character');
+  await root.querySelector('[data-action="save"]').dispatch('click');
+  assert.equal(updates,1);
+  assert.deepEqual(saved.light,{backgroundId:'dark-background',characterId:'light-character'});
+  assert.deepEqual(saved.dark,saved.light);
+  dispose();
+});
+
+test('opening a one-sided legacy image shows both previews without creating an unsaved edit', async () => {
+  const doc = new FakeDocument(), container = makeContainer(doc), original = preset();
+  original.dark.backgroundId = 'dark-only';
+  const dispose = mountEditor(container,{standalone:true,api:{state:async()=>({presets:[original],activePresetId:null}),assetUrl:async id=>`blob:${id}`}});
+  await flush();
+  const root=container.firstElementChild;
+  await root.querySelector('[data-action="edit"]').dispatch('click');
+  await flush();
+  assert.equal(root.querySelector('.dsh-preview-bg').src,'blob:dark-only');
+  assert.equal(root.querySelector('[data-upload-card="background"] .dsh-upload-thumb img').src,'blob:dark-only');
+  await root.querySelector('[data-mode="dark"]').dispatch('click');
+  await flush();
+  assert.equal(root.querySelector('.dsh-preview-bg').src,'blob:dark-only');
+  assert.equal(root.querySelector('[data-upload-state="background"]').textContent,'已设置背景图片');
+  await root.querySelector('[data-action="cancel"]').dispatch('click');
+  assert.equal(root.querySelector('[role="alertdialog"]'),null,'a preview mode change alone does not dirty the draft');
+  assert.equal(root.querySelector('.dsh-editor'),null);
+  assert.equal(original.light.backgroundId,null,'automatic draft normalization does not mutate the saved record');
+  dispose();
 });
 
 test('standalone skin workspace keeps its close control when initial state loading fails', async () => {

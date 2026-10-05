@@ -279,6 +279,25 @@ test('basic with a wallpaper keeps native UI state, separates overlay from panel
   renderer.dispose();
 });
 
+test('one-sided legacy wallpaper and character render in either host theme',async t=>{
+  const previous=globalThis.MutationObserver;globalThis.MutationObserver=FakeObserver;FakeObserver.all=[];
+  t.after(()=>{globalThis.MutationObserver=previous});
+  const {doc,win}=setup();
+  const renderer=installRenderer({api:{state:async()=>({presets:[]}),assetUrl:async id=>id?`asset:${id}`:''},document:doc,window:win});
+  const darkOnly={...preset('basic'),dark:{backgroundId:'wallpaper',characterId:'character'}};
+  renderer.apply(darkOnly);
+  await new Promise(resolve=>setImmediate(resolve));
+  const layer=doc.querySelector('.dsh-skin-layer');
+  assert.equal(layer.querySelector('.dsh-skin-image').src,'asset:wallpaper');
+  assert.equal(layer.querySelector('.dsh-skin-character').src,'asset:character');
+  doc.documentElement.className='dark';
+  renderer.apply({...preset('basic'),light:{backgroundId:'wallpaper',characterId:'character'}});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(layer.querySelector('.dsh-skin-image').src,'asset:wallpaper');
+  assert.equal(layer.querySelector('.dsh-skin-character').src,'asset:character');
+  renderer.dispose();
+});
+
 test('sidebar root replacement and message kind changes rescan only supported boxes',async t=>{
   const previous=globalThis.MutationObserver;globalThis.MutationObserver=FakeObserver;FakeObserver.all=[];
   t.after(()=>{globalThis.MutationObserver=previous});

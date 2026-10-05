@@ -51,6 +51,7 @@ html:is([data-theme="dark"],.dark) .dsh-skin-standalone,html.dark .dsh-skin-stan
 `;
 
 const editorLayoutCss = `
+.dsh-image-conflict{grid-column:1/-1;margin-top:8px;padding-top:10px;border-top:1px solid var(--sk-line)}.dsh-image-conflict p{font-size:12px;color:var(--sk-muted);line-height:1.5}.dsh-image-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:8px}.dsh-image-option{min-width:0;padding:6px;border:1px solid var(--sk-line);border-radius:9px;background:var(--sk-soft);color:var(--sk-ink);text-align:center}.dsh-image-option img{display:block;width:100%;height:64px;object-fit:contain;margin-bottom:4px}.dsh-image-option:focus-visible{outline:2px solid var(--sk-accent);outline-offset:2px}
 .dsh-preview-frame{min-width:0;min-height:360px;display:grid}.dsh-preview-frame>.dsh-preview{width:100%}
 .dsh-control-group{min-width:0;margin:0;padding:10px 12px 12px;border:1px solid var(--sk-line);border-radius:12px}.dsh-load-state{min-height:38vh;display:grid;place-content:center;justify-items:center;gap:12px;text-align:center;color:var(--sk-muted)}
 .dsh-control-group legend{padding:0 6px;color:var(--sk-muted);font-size:12px;font-weight:600}
@@ -142,16 +143,27 @@ export function mountEditor(container, {api, standalone = false, onClose = () =>
       control.disabled = locked;
     });
   };
-  const uploadKey = (targetMode, kind) => targetMode + ':' + kind;
+  const uploadKey = kind => kind;
+  const imageField = kind => kind === 'background' ? 'backgroundId' : 'characterId';
+  const draftAsset = (targetMode, field) => editing?.[targetMode]?.[field] || editing?.[targetMode === 'light' ? 'dark' : 'light']?.[field];
+  const imageConflict = (p, field) => Boolean(p?.light?.[field] && p?.dark?.[field] && p.light[field] !== p.dark[field]);
+  const shareImage = (field, id) => { editing.light[field] = id; editing.dark[field] = id; };
+  function normalizeDraft(p) {
+    for (const field of ['backgroundId', 'characterId']) {
+      if (!p.light[field]) p.light[field] = p.dark[field];
+      if (!p.dark[field]) p.dark[field] = p.light[field];
+    }
+    return p;
+  }
   const revokeUploadUrl = (item) => { if (item?.objectUrl) URL.revokeObjectURL(item.objectUrl); };
   const resetUploadUi = () => { for (const item of uploadUi.values()) revokeUploadUrl(item); uploadUi.clear(); };
   const uploadLabel = (kind) => kind === 'background' ? '背景图片' : '立绘图片';
   const uploadHeading = (kind) => kind === 'background' ? '背景图片' : '透明立绘';
   const uploadMessage = (targetMode, kind) => {
-    const item = uploadUi.get(uploadKey(targetMode, kind));
+    const item = uploadUi.get(uploadKey(kind));
     if (item) return item.message || (item.fileName || '图片') + (item.phase === 'uploaded' ? '：上传完成，保存皮肤后生效' : '：尚未上传');
     const field = kind === 'background' ? 'backgroundId' : 'characterId';
-    return editing?.[targetMode]?.[field] ? '已设置' + uploadLabel(kind) : '尚未选择' + uploadLabel(kind);
+    return draftAsset(targetMode, field) ? '已设置' + uploadLabel(kind) : '尚未选择' + uploadLabel(kind);
   };
   const focusUploadButton = (targetMode, kind) => {
     const restore = () => {
@@ -168,7 +180,7 @@ export function mountEditor(container, {api, standalone = false, onClose = () =>
       const targetMode = card.dataset.mode, kind = card.dataset.uploadCard;
       const thumb = card.querySelector('.dsh-upload-thumb');
       if (!thumb) return;
-      const item = uploadUi.get(uploadKey(targetMode, kind));
+      const item = uploadUi.get(uploadKey(kind));
       if (item?.objectUrl) {
         thumb.innerHTML = '<img alt="' + esc(uploadLabel(kind)) + '预览">';
         const image = thumb.querySelector('img');
@@ -176,7 +188,7 @@ export function mountEditor(container, {api, standalone = false, onClose = () =>
         return;
       }
       const field = kind === 'background' ? 'backgroundId' : 'characterId';
-      const id = editing?.[targetMode]?.[field];
+      const id = draftAsset(targetMode, field);
       if (!id) { thumb.textContent = '暂无图片预览'; return; }
       try {
         const src = await imageUrl(id);
@@ -187,6 +199,12 @@ export function mountEditor(container, {api, standalone = false, onClose = () =>
       } catch {
         if (!disposed && generation === uploadRenderGeneration && thumb.isConnected) thumb.textContent = '图片预览暂不可用';
       }
+    }));
+    await Promise.all([...root.querySelectorAll('[data-legacy-image]')].map(async image => {
+      try {
+        const src = await imageUrl(image.dataset.legacyImage);
+        if (!disposed && generation === uploadRenderGeneration && image.isConnected) image.src = src;
+      } catch {}
     }));
   }
   const unsubscribeState = typeof api.onState === 'function'
@@ -220,10 +238,10 @@ export function mountEditor(container, {api, standalone = false, onClose = () =>
     if (busy) setBusy(true);
   }
   function editorHtml(p) {
-    const s = p.settings, layer = p[mode] || {};
+    const s = p.settings;
     const basic = s.uiStyle === 'basic';
-    const hasBackground = Boolean(layer.backgroundId || (mode === 'dark' && p.light?.backgroundId));
-    const hasCharacter = Boolean(layer.characterId || (mode === 'dark' && p.light?.characterId));
+    const hasBackground = Boolean(draftAsset(mode, 'backgroundId'));
+    const hasCharacter = Boolean(draftAsset(mode, 'characterId'));
     const effectivePanelOpacity = Math.max(.82, Number(s.panelOpacity) || .85);
     const range = (key, label, min, max, step = 1, suffix = '') => {
       const value = key === 'panelOpacity' ? effectivePanelOpacity : s[key];
@@ -231,10 +249,11 @@ export function mountEditor(container, {api, standalone = false, onClose = () =>
     };
     const upload = (key) => {
       const field = key === 'background' ? 'backgroundId' : 'characterId';
-      const exists = Boolean(layer[field]);
+      const exists = Boolean(draftAsset(mode, field));
       const title = uploadHeading(key);
       const inputId = 'upload-' + key + '-' + mode;
-      return `<article class="dsh-upload-card" data-upload-card="${key}" data-mode="${mode}"><h4>${title}</h4><div class="dsh-upload-thumb" role="img" aria-label="${title}预览">暂无图片预览</div><button class="dsh-upload-choose" type="button" data-action="choose-upload" data-kind="${key}" data-mode="${mode}" aria-controls="${inputId}">选择${uploadLabel(key)}</button><input id="${inputId}" type="file" accept="image/png,image/jpeg,image/webp" data-upload="${key}" aria-label="选择${uploadLabel(key)}" hidden tabindex="-1"><span class="dsh-upload-state" role="status" aria-live="polite" data-upload-state="${key}">${esc(uploadMessage(mode, key))}</span>${exists ? `<button class="dsh-upload-remove" type="button" data-action="clear" data-kind="${key}">移除图片</button>` : ''}</article>`;
+      const conflict = imageConflict(p, field) ? `<div class="dsh-image-conflict"><p>这套皮肤原来使用了两张不同的${uploadLabel(key)}，请选择要保留的一张，或上传新图片。</p><div class="dsh-image-options">${['light','dark'].map(source => `<button type="button" class="dsh-image-option" data-action="retain-image" data-kind="${key}" data-source="${source}" aria-label="保留${source === 'light' ? '浅色' : '深色'}${uploadLabel(key)}"><img data-legacy-image="${esc(p[source][field])}" alt="${source === 'light' ? '浅色' : '深色'}${uploadLabel(key)}预览"><span>保留${source === 'light' ? '浅色' : '深色'}图片</span></button>`).join('')}</div></div>` : '';
+      return `<article class="dsh-upload-card" data-upload-card="${key}" data-mode="${mode}"><h4>${title}</h4><div class="dsh-upload-thumb" role="img" aria-label="${title}预览">暂无图片预览</div><button class="dsh-upload-choose" type="button" data-action="choose-upload" data-kind="${key}" data-mode="${mode}" aria-controls="${inputId}">选择${uploadLabel(key)}</button><input id="${inputId}" type="file" accept="image/png,image/jpeg,image/webp" data-upload="${key}" aria-label="选择${uploadLabel(key)}" hidden tabindex="-1"><span class="dsh-upload-state" role="status" aria-live="polite" data-upload-state="${key}">${esc(uploadMessage(mode, key))}</span>${exists ? `<button class="dsh-upload-remove" type="button" data-action="clear" data-kind="${key}">移除图片</button>` : ''}${conflict}</article>`;
     };
     return `<section class="dsh-editor"><div class="dsh-editor-top"><div><h3>${p.id ? '编辑皮肤' : '新建皮肤'}</h3><input class="dsh-name" data-setting="name" type="text" maxlength="100" value="${esc(p.name)}" aria-label="皮肤名称"></div><div class="dsh-row"><div class="dsh-mode"><button data-mode="light" aria-pressed="${mode === 'light'}">浅色</button><button data-mode="dark" aria-pressed="${mode === 'dark'}">深色</button></div><button class="dsh-btn" data-action="cancel">返回列表</button><button class="dsh-btn primary" data-action="save">保存</button></div></div><div class="dsh-editor-grid"><div class="dsh-preview-frame"><div class="dsh-preview"><img class="dsh-preview-bg" alt="" aria-hidden="true"><div class="dsh-preview-shade"></div><div class="dsh-preview-tint"></div><div class="dsh-preview-sidebar"><div class="dsh-preview-new-session">＋ 新建会话</div><div class="dsh-preview-row selected">最近对话</div><div class="dsh-preview-row">工作区</div></div><div class="dsh-preview-header" aria-hidden="true"><div class="dsh-preview-header-title">会话标题</div><div class="dsh-preview-header-tabs"><span>对话</span><span>轨迹</span></div></div><div class="dsh-preview-message"></div><div class="dsh-preview-message second"></div><div class="dsh-preview-compose"><div class="dsh-preview-toolbar"><span>工作区内修改</span><span>模型</span></div><span class="dsh-preview-send" aria-hidden="true">↑</span></div><img class="dsh-preview-person" alt="" aria-hidden="true" style="display:none"><div class="dsh-preview-label">DeepSeek Harness</div></div></div><div class="dsh-controls"><fieldset class="dsh-control-group"><legend>图片素材</legend><p class="dsh-upload-limit">支持 PNG、JPG、WebP，单张不超过 10 MiB</p><div class="dsh-upload-cards">${upload('background')}${upload('character')}</div></fieldset>${hasBackground ? `<fieldset class="dsh-control-group"><legend>背景调整</legend>${range('backgroundX', '背景水平位置', 0, 100, 1, '%')}${range('backgroundY', '背景垂直位置', 0, 100, 1, '%')}${range('backgroundScale', '背景缩放', 100, 200, 1, '%')}${range('blur', '背景模糊', 0, 20, 1, 'px')}</fieldset>` : ''}<fieldset class="dsh-control-group"><legend>可读性与配色</legend>${basic ? '' : `<div class="dsh-field"><label>强调色</label><input type="color" data-setting="accent" value="${esc(s.accent)}"></div>`}${range('overlay', '背景遮罩', 0, 0.9, 0.01)}${basic ? '' : range('panelOpacity', '面板不透明度', .82, 1, 0.01)}<div class="dsh-field"><label for="setting-uiStyle-${mode}">皮肤模式</label><select id="setting-uiStyle-${mode}" data-setting="uiStyle"><option value="refined" ${s.uiStyle === 'refined' ? 'selected' : ''}>精致主题</option><option value="basic" ${s.uiStyle === 'basic' ? 'selected' : ''}>基础皮肤</option></select></div>${basic ? '' : `<div class="dsh-field"><label for="setting-decorations-${mode}">装饰边框与阴影</label><input id="setting-decorations-${mode}" type="checkbox" data-setting="decorations" ${s.decorations ? 'checked' : ''}></div>`}</fieldset>${hasCharacter ? `<fieldset class="dsh-control-group"><legend>立绘设置</legend><div class="dsh-field"><label>立绘位置</label><select data-setting="characterSide"><option value="left" ${s.characterSide === 'left' ? 'selected' : ''}>左侧</option><option value="right" ${s.characterSide === 'right' ? 'selected' : ''}>右侧</option></select></div>${range('characterSize', '立绘大小', 10, 60, 1, '%')}${range('characterOpacity', '立绘透明度', 0, 1, 0.01)}<div class="dsh-field"><label>立绘镜像</label><input type="checkbox" data-setting="characterMirror" ${s.characterMirror ? 'checked' : ''}></div></fieldset>` : ''}</div></div><div class="dsh-notice" role="status">${esc(notice)}</div></section>`;
   }
@@ -244,8 +263,8 @@ export function mountEditor(container, {api, standalone = false, onClose = () =>
   }
   async function syncPreview(){
     const current=++previewGeneration;
-    const p=editing,s=p.settings,lay=p[mode]||{}; const bg=root.querySelector('.dsh-preview-bg'), shade=root.querySelector('.dsh-preview-shade'), person=root.querySelector('.dsh-preview-person');
-    if(!bg)return; let id=lay.backgroundId || (mode==='dark'?p.light?.backgroundId:null) || '';
+    const p=editing,s=p.settings; const bg=root.querySelector('.dsh-preview-bg'), shade=root.querySelector('.dsh-preview-shade'), person=root.querySelector('.dsh-preview-person');
+    if(!bg)return; let id=draftAsset(mode, 'backgroundId') || '';
     try { const src=await imageUrl(id); if(current!==previewGeneration)return; if(src)bg.src=src;else bg.removeAttribute('src'); } catch { if(current===previewGeneration)bg.removeAttribute('src'); }
     bg.style.objectPosition=`${s.backgroundX}% ${s.backgroundY}%`; bg.style.transform=`scale(${s.backgroundScale/100})`; bg.style.transformOrigin=`${s.backgroundX}% ${s.backgroundY}%`; bg.style.filter=`blur(${s.blur}px)`;shade.style.background=`rgba(24,20,23,${s.overlay})`;
     person.style.display='none';person.style.left=s.characterSide==='left'?'4%':'auto';person.style.right=s.characterSide==='right'?'4%':'auto';person.style.width=`${s.characterSize}%`;person.style.opacity=s.characterOpacity;person.style.transform=s.characterMirror?'scaleX(-1)':'';
@@ -287,7 +306,7 @@ export function mountEditor(container, {api, standalone = false, onClose = () =>
         card.style.boxShadow=refined&&s.decorations!==false?'0 4px 16px rgba(40,25,35,.12)':'none';
       }
     }
-    const char=lay.characterId || (mode==='dark'?p.light?.characterId:'');
+    const char=draftAsset(mode, 'characterId');
     try { const src=await imageUrl(char); if(current!==previewGeneration)return; if(src){person.src=src;person.style.display='block';} else {person.removeAttribute('src');} } catch {if(current===previewGeneration)person.removeAttribute('src');}
   }
   async function refresh(){
@@ -315,16 +334,18 @@ export function mountEditor(container, {api, standalone = false, onClose = () =>
   async function action(btn){
     const a=btn.dataset.action,id=btn.dataset.id;
     if(a==='new'){ resetUploadUi(); editing={id:null,name:'新建皮肤',light:{backgroundId:null,characterId:null},dark:{backgroundId:null,characterId:null},settings:{...DEFAULT_SETTINGS}};initialDraft=JSON.stringify(editing);mode='light';render(); }
-    else if(a==='edit'){const p=state.presets.find(x=>x.id===id);if(p){resetUploadUi();editing=fresh(p);initialDraft=JSON.stringify(editing);mode='light';render();}}
+    else if(a==='edit'){const p=state.presets.find(x=>x.id===id);if(p){resetUploadUi();editing=normalizeDraft(fresh(p));initialDraft=JSON.stringify(editing);mode='light';render();}}
     else if(a==='cancel'){requestDiscard('editor');}
     else if(a==='workspace-close'){requestClose();}
     else if(a==='continue-editing'){resolveDiscard(false);}
     else if(a==='discard-changes'){resolveDiscard(true);}
     else if(a==='retry'){try{await refresh()}catch{}}
-    else if(a==='clear'){const targetMode=mode,kind=btn.dataset.kind,key=uploadKey(mode,kind);revokeUploadUrl(uploadUi.get(key));uploadUi.delete(key);const field=kind==='background'?'backgroundId':'characterId';editing[targetMode][field]=null;render();focusUploadButton(targetMode,kind);}
+    else if(a==='clear'){const targetMode=mode,kind=btn.dataset.kind,key=uploadKey(kind);revokeUploadUrl(uploadUi.get(key));uploadUi.delete(key);shareImage(imageField(kind),null);render();focusUploadButton(targetMode,kind);}
+    else if(a==='retain-image'){const kind=btn.dataset.kind,field=imageField(kind);shareImage(field,editing[btn.dataset.source][field]);notice='';render();focusUploadButton(mode,kind);}
     else if(a==='delete-cancel'){deletingId=null;render();}
     else if(a==='save'){
       const p=fresh(editing); if(!p.name.trim()){status('请填写皮肤名称');return;}
+      if (['backgroundId','characterId'].some(field => imageConflict(p,field))) { status('请先选择要保留的图片，再保存皮肤。'); return; }
       try{setBusy(true); if(!p.id){const created=await api.create(p.name);const added=created?.presets?.[created.presets.length-1];if(!added)throw new Error('创建成功但未返回新皮肤');editing.id=added.id;p.id=added.id;} const updated=await api.update(p.id,p); resetUploadUi();editing=null;initialDraft=null;await acceptProfile(updated);}catch(e){status(`保存失败：${e.message||e}`)}finally{setBusy(false)}
     } else if(a==='duplicate'||a==='delete'||a==='delete-confirm'){
       const p=state.presets.find(x=>x.id===id);if(!p)return;
@@ -347,7 +368,7 @@ export function mountEditor(container, {api, standalone = false, onClose = () =>
   async function handleUpload(t) {
     const file = t.files?.[0];
     if (!file || busy || !editing) return;
-    const targetMode = mode, kind = t.dataset.upload, key = uploadKey(targetMode, kind);
+    const targetMode = mode, kind = t.dataset.upload, key = uploadKey(kind);
     t.value = '';
     const item = {fileName: file.name || '所选图片', phase: 'checking', message: '正在检查图片…'};
     uploadUi.set(key, item);
@@ -390,7 +411,7 @@ export function mountEditor(container, {api, standalone = false, onClose = () =>
       stage = 'upload';
       const asset = await api.upload(file);
       if (disposed || editing == null) return;
-      editing[targetMode][kind === 'background' ? 'backgroundId' : 'characterId'] = asset.id;
+      shareImage(imageField(kind), asset.id);
       revokeUploadUrl(item);
       item.objectUrl = '';
       item.phase = 'uploaded';

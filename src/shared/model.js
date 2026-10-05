@@ -65,7 +65,14 @@ export function validateProfile(input) {
     };
     if (settings.uiStyle !== 'refined' && settings.uiStyle !== 'basic') fail(`${path}.settings.uiStyle`, 'expected refined or basic');
     if (typeof settings.decorations !== 'boolean') fail(`${path}.settings.decorations`, 'expected boolean');
-    return { id: p.id, name: p.name.trim(), light: mode(p.light, `${path}.light`), dark: mode(p.dark, `${path}.dark`), settings };
+    const light = mode(p.light, `${path}.light`), dark = mode(p.dark, `${path}.dark`);
+    // A single legacy image becomes shared. Keep two different existing images
+    // until the user chooses which one to retain in the editor.
+    for (const key of ['backgroundId', 'characterId']) {
+      if (!light[key]) light[key] = dark[key];
+      if (!dark[key]) dark[key] = light[key];
+    }
+    return { id: p.id, name: p.name.trim(), light, dark, settings };
   });
   const activePresetId = input.activePresetId;
   if (activePresetId !== null && (typeof activePresetId !== 'string' || !ids.has(activePresetId))) fail('activePresetId', 'must be null or an existing preset id');
