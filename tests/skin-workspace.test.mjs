@@ -55,7 +55,7 @@ class FakeElement {
   get parentNode() { return this.parentElement; }
   get firstElementChild() { return this.children[0] || null; }
   get lastElementChild() { return this.children.at(-1) || null; }
-  get isConnected() { return this === this.ownerDocument.body || Boolean(this.parentElement?.isConnected); }
+  get isConnected() { return this === this.ownerDocument.documentElement || this === this.ownerDocument.body || Boolean(this.parentElement?.isConnected); }
   get textContent() { return this._text || this.children.map((child) => child.textContent).join(''); }
   set textContent(value) { this._text = String(value); this._html = ''; this.clearChildren(); }
   set innerHTML(html) {
@@ -144,16 +144,68 @@ class FakeElement {
   querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
 }
 
+class FakeMutationObserver {
+  constructor(callback) { this.callback = callback; this.targets = []; this.disconnected = false; }
+  observe(target, options) { this.targets.push({target, options}); }
+  disconnect() { this.disconnected = true; }
+  trigger(records) { if (!this.disconnected) this.callback(records); }
+}
+
 class FakeDocument {
-  constructor() {
+  constructor({dark = false} = {}) {
     this.activeElement = null;
     this.listeners = new Map();
+    this.documentElement = new FakeElement('html', this);
     this.head = new FakeElement('head', this);
     this.body = new FakeElement('body', this);
+    this.documentElement.append(this.head, this.body);
+    this.observers = [];
+    this.mediaListeners = new Set();
+    this.media = {
+      matches: dark,
+      addEventListener: (type, listener) => { if (type === 'change') this.mediaListeners.add(listener); },
+      removeEventListener: (type, listener) => { if (type === 'change') this.mediaListeners.delete(listener); },
+    };
+    this.defaultView = {matchMedia: () => this.media};
+    const doc = this;
+    this.defaultView.MutationObserver = class extends FakeMutationObserver {
+      constructor(callback) { super(callback); doc.observers.push(this); }
+    };
+    if (dark) this.setInitialTheme(true);
+    else this.setInitialTheme(false);
   }
   createElement(tag) { return new FakeElement(tag, this); }
   addEventListener(type, listener) { const list = this.listeners.get(type) || []; list.push(listener); this.listeners.set(type, list); }
   removeEventListener(type, listener) { this.listeners.set(type, (this.listeners.get(type) || []).filter((candidate) => candidate !== listener)); }
+  setInitialTheme(dark) {
+    this.documentElement.className = dark ? 'dark' : 'light';
+    this.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+    this.media.matches = dark;
+    if (dark) this.body.setAttribute('data-ds-dark-theme', '');
+  }
+  setTheme(dark, via = 'mutation') {
+    if (via === 'media') {
+      this.documentElement.removeAttribute('data-theme');
+      this.documentElement.className = '';
+      this.documentElement.style.colorScheme = '';
+      this.body.removeAttribute('data-ds-dark-theme');
+      this.media.matches = dark;
+      for (const listener of this.mediaListeners) listener({matches: dark});
+      return;
+    }
+    this.documentElement.className = dark ? 'dark' : 'light';
+    this.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+    this.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+    if (dark) this.body.setAttribute('data-ds-dark-theme', '');
+    else this.body.removeAttribute('data-ds-dark-theme');
+    const records = [
+      {type: 'attributes', target: this.documentElement, attributeName: 'class'},
+      {type: 'attributes', target: this.documentElement, attributeName: 'data-theme'},
+      {type: 'attributes', target: this.documentElement, attributeName: 'style'},
+      {type: 'attributes', target: this.body, attributeName: 'data-ds-dark-theme'},
+    ];
+    for (const observer of this.observers) observer.trigger(records);
+  }
 }
 
 function makeContainer(doc) {
@@ -253,8 +305,8 @@ function imageFile(name, type, signature) {
   return {name, type, size: bytes.length, slice: () => ({arrayBuffer: async () => bytes.buffer.slice(0)})};
 }
 
-test('basic editor preserves its stored refined-only controls while preview controls follow mode and available assets', async () => {
-  const doc = new FakeDocument();
+test('basic editor follows host theme changes without rerendering or dirtying the draft', async () => {
+  const doc = new FakeDocument({dark: true});
   const container = makeContainer(doc);
   const profile = preset();
   profile.light.backgroundId = 'saved-background';
@@ -265,19 +317,40 @@ test('basic editor preserves its stored refined-only controls while preview cont
   const dispose = mountEditor(container, {
     api: {state: async () => ({presets: [profile], activePresetId: null}), assetUrl: async id => `blob:${id}`, onState: () => () => {}, update: async (_id, next) => {savedSettings=next.settings;return {presets: [next], activePresetId: null};}},
     standalone: true,
-    getUiTheme: settings => ({button: settings.accent, buttonText: '#fff', accent: settings.accent, brand: settings.accent, composerFill: settings.accent, toolbar: settings.accent, selected: settings.accent, wallpaperTint: `rgba(255,255,255,${settings.panelOpacity})`, line: settings.accent, headerFill: settings.accent, headerInk: settings.accent, headerMuted: settings.accent, headerAccent: settings.accent}),
+    getUiTheme: (settings, dark) => ({button: settings.accent, buttonText: '#fff', accent: settings.accent, brand: settings.accent, composerFill: dark ? '#1c1c20' : settings.accent, toolbar: settings.accent, selected: settings.accent, wallpaperTint: dark ? 'rgba(28,28,32,0)' : `rgba(255,255,255,${settings.panelOpacity})`, line: settings.accent, ink: dark ? '#f5f2f3' : '#29272a', muted: dark ? '#b9b4bc' : '#535058', pageContent: dark ? 'rgba(20,18,24,0.88)' : 'rgba(255,255,255,0.92)', pageSidebar: dark ? 'rgba(20,18,24,0.88)' : 'rgba(255,255,255,0.90)', pageHeader: dark ? 'rgba(20,18,24,0.88)' : 'rgba(255,255,255,0.94)', pageMuted: '#535058', headerFill: dark ? '#1c1c20' : '#ffffff', headerInk: dark ? '#f5f2f3' : '#29272a', headerMuted: dark ? '#ded9df' : '#535058', headerAccent: dark ? '#4b91d1' : '#4b91d1'}),
   });
   await flush();
   let root = container.firstElementChild;
   assert.equal(root.querySelector('[data-action="rename"]'), null, 'name changes remain in the editor form');
   await root.querySelector('[data-action="edit"]').dispatch('click');
   root = container.firstElementChild;
-  const lightPreview = root.querySelector('.dsh-preview');
-  assert.equal(lightPreview.style['--sk-ink'], '#29272a', 'light basic preview uses light native ink regardless of the host theme');
-  assert.equal(lightPreview.style['--sk-muted'], '#716c73');
+  const preview = root.querySelector('.dsh-preview');
+  assert.equal(preview.getAttribute('data-dark'), 'true', 'an editor opened under the host dark theme starts with a dark preview');
+  assert.equal(preview.style['--sk-ink'], '#f5f2f3');
+  assert.equal(preview.style['--sk-fill'], '#1c1c20');
   assert.equal(root.style['--sk-accent'], '#D88F9E', 'editor controls retain their own accent color');
-  await root.querySelector('[data-mode="dark"]').dispatch('click');
-  root = container.firstElementChild;
+
+  const nameInput = root.querySelector('[data-setting="name"]');
+  const uiStyle = root.querySelector('[data-setting="uiStyle"]');
+  assert.equal(uiStyle.id, 'setting-uiStyle', 'settings IDs no longer include a theme suffix');
+  assert.equal(root.querySelector('[data-setting="backgroundX"]').id, 'setting-backgroundX');
+  assert.equal(root.querySelector('[data-setting="decorations"]'), null, 'basic style controls remain hidden for legacy basic presets');
+  doc.setTheme(false);
+  await flush();
+  assert.equal(preview.getAttribute('data-dark'), 'false', 'an html class/theme mutation changes the preview to light');
+  assert.equal(preview.style['--sk-ink'], '#29272a');
+  assert.equal(preview.style['--sk-fill'], 'rgba(255,255,255,0.92)');
+  doc.setTheme(true, 'media');
+  await flush();
+  assert.equal(preview.getAttribute('data-dark'), 'true', 'a prefers-color-scheme change changes the preview back to dark');
+  assert.equal(preview.style['--sk-ink'], '#f5f2f3');
+  assert.equal(root.querySelector('[data-setting="name"]'), nameInput, 'theme changes do not rerender controls');
+  assert.equal(root.querySelector('[data-setting="uiStyle"]'), uiStyle);
+  assert.doesNotMatch(root.innerHTML, /setting-[\w]+-(?:light|dark)/, 'settings IDs remain stable across host theme changes');
+  assert.doesNotMatch(root.innerHTML, /data-mode=/, 'the editor no longer renders a manual theme switch');
+  assert.equal(profile.light.backgroundId, 'saved-background');
+  assert.equal(profile.dark.backgroundId, null, 'following theme changes does not normalize or dirty the saved draft');
+
   assert.ok(root.querySelector('[data-setting="name"]'));
   assert.ok(root.querySelector('[data-setting="overlay"]'));
   assert.ok(root.querySelector('[data-setting="backgroundX"]'), 'light background settings remain available in dark mode via fallback');
@@ -285,10 +358,6 @@ test('basic editor preserves its stored refined-only controls while preview cont
   assert.equal(root.querySelector('[data-setting="panelOpacity"]'), null);
   assert.equal(root.querySelector('[data-setting="decorations"]'), null);
   assert.equal(root.querySelector('[data-setting="characterSide"]'), null, 'character controls are absent without an effective portrait');
-  const preview = root.querySelector('.dsh-preview');
-  assert.equal(preview.getAttribute('data-dark'), 'true');
-  assert.equal(preview.style['--sk-ink'], '#f5f2f3');
-  assert.equal(preview.style['--sk-fill'], '#1c1c20');
   assert.equal(preview.style['--sk-brand'], '#4b91d1', 'basic preview ignores stored theme accent');
   assert.equal(preview.style['--sk-wallpaper-tint'], 'rgba(28,28,32,0)');
   assert.equal(preview.style['--sk-header-accent'], '#4b91d1');
@@ -298,11 +367,10 @@ test('basic editor preserves its stored refined-only controls while preview cont
   assert.ok(root.querySelector('.dsh-preview-sidebar'), 'the native sidebar silhouette remains visible in basic preview');
   assert.ok(root.querySelector('.dsh-preview-compose'), 'the native composer silhouette remains visible in basic preview');
 
-  const modeSelect = root.querySelector('[data-setting="uiStyle"]');
-  modeSelect.value = 'refined';
-  await modeSelect.dispatch('change');
+  uiStyle.value = 'refined';
+  await uiStyle.dispatch('change');
   root = container.firstElementChild;
-  assert.equal(doc.activeElement.id, 'setting-uiStyle-dark', 'the style selector retains focus after its controls rerender');
+  assert.equal(doc.activeElement.id, 'setting-uiStyle', 'the style selector retains focus after its controls rerender');
   assert.ok(root.querySelector('[data-setting="accent"]'));
   assert.ok(root.querySelector('[data-setting="decorations"]'));
   assert.equal(root.querySelector('.dsh-preview-label').style.color, '#D88F9E');
@@ -313,6 +381,51 @@ test('basic editor preserves its stored refined-only controls while preview cont
   await root.querySelector('[data-action="save"]').dispatch('click');
   assert.equal(savedSettings.panelOpacity, .5, 'switching styles leaves the stored legacy opacity unchanged on save');
   dispose();
+  assert.equal(doc.mediaListeners.size, 0, 'disposing the editor removes the media query listener');
+  assert.ok(doc.observers.every(observer => observer.disconnected), 'disposing the editor disconnects its host theme observers');
+});
+
+test('host theme changes update preview palette before a pending background lookup resolves', async () => {
+  const doc = new FakeDocument();
+  const container = makeContainer(doc);
+  const profile = preset();
+  profile.light.backgroundId = 'slow-background';
+  let resolveAsset;
+  const pendingAsset = new Promise(resolve => { resolveAsset = resolve; });
+  const dispose = mountEditor(container, {
+    api: {
+      state: async () => ({presets: [profile], activePresetId: null}),
+      assetUrl: async () => pendingAsset,
+    },
+    standalone: true,
+    getUiTheme: (_settings, dark) => ({
+      button: '#25364a', buttonText: '#fff', accent: '#D88F9E', brand: '#D88F9E',
+      composerFill: dark ? '#29272e' : '#f8f5f6', toolbar: '#ece8eb', selected: '#e2dce8',
+      wallpaperTint: dark ? 'rgba(28,28,32,0.12)' : 'rgba(255,255,255,0.12)',
+      line: '#d8cbd1', ink: dark ? '#f5f2f3' : '#29272a', muted: dark ? '#b9b4bc' : '#535058',
+      pageContent: dark ? 'rgba(20,18,24,0.88)' : 'rgba(255,255,255,0.92)',
+      pageSidebar: dark ? 'rgba(20,18,24,0.88)' : 'rgba(255,255,255,0.90)',
+      pageHeader: dark ? 'rgba(20,18,24,0.88)' : 'rgba(255,255,255,0.94)', pageMuted: '#535058',
+      headerFill: dark ? '#1c1c20' : '#ffffff', headerInk: dark ? '#f5f2f3' : '#29272a',
+      headerMuted: dark ? '#ded9df' : '#535058', headerAccent: '#4b91d1',
+    }),
+  });
+  try {
+    await flush();
+    let root = container.firstElementChild;
+    await root.querySelector('[data-action="edit"]').dispatch('click');
+    root = container.firstElementChild;
+    const preview = root.querySelector('.dsh-preview');
+    assert.equal(preview.getAttribute('data-dark'), 'false');
+    doc.setTheme(true);
+    assert.equal(preview.getAttribute('data-dark'), 'true', 'host theme updates preview mode without waiting for the image');
+    assert.equal(preview.style['--sk-ink'], '#f5f2f3');
+    assert.equal(preview.style['--sk-header-fill'], '#1c1c20', 'basic preview uses its neutral dark header fill');
+    resolveAsset('blob:slow-background');
+    await flush();
+    assert.equal(preview.getAttribute('data-dark'), 'true', 'resolving the old image request cannot restore the light palette');
+    assert.equal(root.querySelector('.dsh-preview-bg').src, 'blob:slow-background');
+  } finally { dispose(); }
 });
 
 test('image cards use keyboard-accessible chooser buttons and reject a confirmed MIME/signature mismatch', async () => {
@@ -339,7 +452,7 @@ test('image cards use keyboard-accessible chooser buttons and reject a confirmed
   await flush();
   assert.match(root.innerHTML, /支持 PNG、JPG、WebP，单张不超过 10 MiB/);
   assert.doesNotMatch(root.innerHTML, /Choose File|No file chosen/);
-  const backgroundInput = root.querySelector('#upload-background-light');
+  const backgroundInput = root.querySelector('#upload-background');
   assert.equal(backgroundInput.hasAttribute('hidden'), true);
   assert.equal(backgroundInput.getAttribute('tabindex'), '-1');
   assert.equal(root.querySelector('[data-action="clear"][data-kind="background"]').textContent, '移除图片');
@@ -366,7 +479,7 @@ test('image cards use keyboard-accessible chooser buttons and reject a confirmed
   dispose();
 });
 
-test('image upload, thumbnails, failed replacements, and removal share assets across modes', async () => {
+test('image upload, thumbnails, failed replacements, and removal share assets across host themes', async () => {
   const doc = new FakeDocument();
   const container = makeContainer(doc);
   const profile = preset();
@@ -413,14 +526,17 @@ test('image upload, thumbnails, failed replacements, and removal share assets ac
     assert.equal(root.querySelector('[data-upload-state="background"]').textContent, '已设置背景图片');
     assert.equal(root.querySelector('[data-upload-state="character"]').textContent, '已设置立绘图片', 'a legacy dark-only portrait is shared into light');
     assert.doesNotMatch(root.innerHTML, /浅色与深色共用/);
-    await root.querySelector('[data-mode="dark"]').dispatch('click');
-    root = container.firstElementChild;
+    assert.doesNotMatch(root.innerHTML, /data-mode=/, 'upload cards have no theme-dependent mode marker');
+    assert.equal(root.querySelector('#upload-background').getAttribute('data-upload'), 'background');
+    assert.equal(root.querySelector('[data-upload-card="background"]').getAttribute('data-mode'), null);
+    doc.setTheme(true);
+    await flush();
     assert.equal(root.querySelector('[data-upload-state="character"]').textContent, '已设置立绘图片');
     assert.equal(root.querySelector('[data-upload-card="background"] .dsh-upload-thumb img').src, 'blob:saved-background', 'dark mode shows the shared background thumbnail');
     assert.equal(root.querySelector('[data-upload-card="character"] h4').textContent, '透明立绘');
     assert.equal(root.querySelector('[data-action="choose-upload"][data-kind="character"]').textContent, '选择立绘图片');
     assert.doesNotMatch(root.querySelector('.dsh-upload-limit').textContent, /透明|背景透明/);
-    const input = root.querySelector('#upload-character-dark');
+    const input = root.querySelector('#upload-character');
     const file = imageFile('立绘.png', 'image/png', [137, 80, 78, 71, 13, 10, 26, 10]);
     input.files = [file];
     const pending = input.dispatch('change');
@@ -438,12 +554,12 @@ test('image upload, thumbnails, failed replacements, and removal share assets ac
     assert.match(root.querySelector('[data-upload-state="character"]').textContent, /立绘\.png：上传完成，保存皮肤后生效/);
     assert.equal(root.querySelector('[data-action="clear"][data-kind="character"]').textContent, '移除图片');
     assert.equal(doc.activeElement.dataset.action, 'choose-upload', 'focus returns to the chooser after upload');
-    assert.equal(doc.activeElement.dataset.mode, 'dark');
+    assert.equal(doc.activeElement.dataset.kind, 'character');
     assert.ok(revoked.includes('blob:pending-image'), 'temporary object URLs are revoked after upload');
     assert.equal(profile.dark.characterId, 'saved-character', 'the selected filename and uploaded id do not mutate the saved preset');
 
     failNextUpload = true;
-    const failedInput = root.querySelector('#upload-character-dark');
+    const failedInput = root.querySelector('#upload-character');
     failedInput.files = [imageFile('bad-response.png', 'image/png', [137, 80, 78, 71, 13, 10, 26, 10])];
     await failedInput.dispatch('change');
     root = container.firstElementChild;
@@ -452,10 +568,10 @@ test('image upload, thumbnails, failed replacements, and removal share assets ac
     assert.equal(root.querySelector('[data-upload-card="character"] .dsh-upload-thumb img').src, 'blob:new-character', 'a failed server replacement restores the previous draft thumbnail');
     assert.equal(root.querySelector('[data-action="clear"][data-kind="character"]').textContent, '移除图片', 'the previous draft asset id remains set after server failure');
     assert.equal(doc.activeElement.dataset.action, 'choose-upload', 'focus returns to the same chooser after server failure');
-    assert.equal(doc.activeElement.dataset.mode, 'dark');
+    assert.equal(doc.activeElement.dataset.kind, 'character');
 
-    await root.querySelector('[data-mode="light"]').dispatch('click');
-    root = container.firstElementChild;
+    doc.setTheme(false, 'media');
+    await flush();
     assert.match(root.querySelector('[data-upload-state="background"]').textContent, /已设置背景图片/);
     await flush();
     assert.equal(root.querySelector('[data-upload-card="character"] .dsh-upload-thumb img').src, 'blob:new-character', 'replacement from dark mode also appears in light');
@@ -465,8 +581,8 @@ test('image upload, thumbnails, failed replacements, and removal share assets ac
     assert.equal(root.querySelector('[data-upload-state="background"]').textContent, '尚未选择背景图片');
     assert.ok(root.querySelector('[data-action="clear"][data-kind="character"]'), 'removing the background preserves the shared character');
     assert.equal(doc.activeElement.dataset.action, 'choose-upload', 'focus returns to the chooser after image removal');
-    assert.equal(doc.activeElement.dataset.mode, 'light');
-    await root.querySelector('[data-mode="dark"]').dispatch('click');
+    assert.equal(doc.activeElement.dataset.kind, 'background');
+    doc.setTheme(true);
     await flush();
     assert.equal(root.querySelector('[data-upload-state="background"]').textContent, '尚未选择背景图片', 'removal clears both modes');
     assert.equal(root.querySelector('.dsh-preview-bg').src, undefined, 'removed background no longer falls back to another mode');
@@ -507,7 +623,7 @@ test('legacy image conflicts preserve both originals until an explicit choice an
   await root.querySelector('[data-action="save"]').dispatch('click');
   assert.equal(updates,0,'the remaining character conflict also needs an explicit choice');
   await root.querySelector('[data-action="retain-image"][data-kind="character"][data-source="light"]').dispatch('click');
-  await root.querySelector('[data-mode="dark"]').dispatch('click');
+  doc.setTheme(true);
   await flush();
   assert.equal(root.querySelectorAll('.dsh-image-conflict').length,0);
   assert.equal(root.querySelector('[data-upload-card="character"] .dsh-upload-thumb img').src,'blob:light-character');
@@ -530,7 +646,7 @@ test('opening a one-sided legacy image shows both previews without creating an u
   await flush();
   assert.equal(root.querySelector('.dsh-preview-bg').src,'blob:dark-only');
   assert.equal(root.querySelector('[data-upload-card="background"] .dsh-upload-thumb img').src,'blob:dark-only');
-  await root.querySelector('[data-mode="dark"]').dispatch('click');
+  doc.setTheme(true);
   await flush();
   assert.equal(root.querySelector('.dsh-preview-bg').src,'blob:dark-only');
   assert.equal(root.querySelector('[data-upload-state="background"]').textContent,'已设置背景图片');

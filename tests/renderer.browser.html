@@ -7,7 +7,7 @@
   <style>
     /* Mirrors DSH on Darwin: base is declared on body, and nested app surfaces consume it. */
     html, body { height: 100%; margin: 0; font: 15px system-ui, sans-serif; }
-    body { --dsw-alias-bg-base: #ffffff; --dsw-alias-bg-layer-1: #f0f0f0; --dsw-alias-bg-layer-2: #fafafa; --dsw-alias-bg-layer-3: #eeeeee; background: var(--dsw-alias-bg-base); isolation: isolate; }
+    body { --dsw-alias-bg-base: #ffffff; --dsw-alias-bg-layer-1: #f0f0f0; --dsw-alias-bg-layer-2: #fafafa; --dsw-alias-bg-layer-3: #eeeeee; --dsw-alias-state-business-primary: #1871b8; background: var(--dsw-alias-bg-base); isolation: isolate; }
     html[data-platform="darwin"], html[data-platform="darwin"] body { background: transparent; }
     html[data-platform="darwin"] [data-window-drag] { -webkit-app-region: drag; }
     html[data-platform="darwin"] [data-window-drag-recall] { -webkit-app-region: no-drag; }
@@ -22,6 +22,16 @@
     .ST7X_W_tab { color: var(--dsw-alias-label-tertiary); }
     .ST7X_W_tabActive { color: var(--dsw-alias-state-business-primary); border-bottom: 2px solid currentColor; }
     [data-slot="sidebar"] { display: contents; } .sidebar-col { width: 180px; flex: none; background: var(--dsw-specific-sidebar-fill); } .sidebar { padding: 20px; background: color-mix(in srgb, #805b68 50%, transparent); }
+    .jJkEga_folderActive { color: var(--dsw-alias-state-business-primary); }
+    .y0jqnG_trigger { color: var(--dsw-alias-label-tertiary); background: transparent; border: 0; padding: 1px 8px; display: inline-flex; }
+    .ppByMG_actions { opacity: 0; } .ppByMG_actions:focus-within { opacity: 1; } .ppByMG_action[data-unavailable] { opacity: .4; }
+    .CxUija_pageHeading { display: flex; justify-content: space-between; } .CxUija_pageHeading h1 { flex: 1; }
+    .fixture-file-card { background: #fff; padding: 10px; }
+    .fixture-status-success { color: #28784c; }
+    .fixture-status-error { color: #a12638; }
+    .fixture-primary { color: var(--dsw-alias-label-primary); }
+    .fixture-secondary { color: var(--dsw-alias-label-secondary); }
+    .fixture-tertiary { color: var(--dsw-alias-label-tertiary); }
     .center-column { min-width: 0; flex: 1; display: flex; flex-direction: column; background: var(--dsw-alias-bg-base); }
     [data-slot="main"] { min-height: 0; flex: 1; padding: 24px; overflow: auto; background: var(--dsw-alias-bg-base); }
     /* DSH mounts slot anchors with display:contents; the actual conversation surface is nested below. */
@@ -35,17 +45,18 @@
 </head>
 <body>
   <div id="root" class="app-frame" data-slot="root">
-    <div class="sidebar-col"><div data-slot="sidebar"><aside class="sidebar"><button class="_3WPZCG_newSession">New session</button><div class="_3WPZCG_panelRow _3WPZCG_panelActive" aria-current="page">Active chat</div><div class="_3WPZCG_panelRow" role="treeitem" aria-selected="true">Selected workspace</div></aside></div></div>
+    <div class="sidebar-col"><div data-slot="sidebar"><aside class="sidebar _3WPZCG_root"><button class="_3WPZCG_newSession">New session</button><div class="_3WPZCG_panelRow _3WPZCG_panelActive" aria-current="page">Active chat</div><div class="_3WPZCG_panelRow" role="treeitem" aria-selected="true">Selected workspace</div><span class="jJkEga_time">4 days</span><span class="jJkEga_projectText">Recent project</span><span class="jJkEga_slot">Folder icon</span><span class="jJkEga_slot jJkEga_folderActive">Active folder icon</span></aside></div></div>
     <div class="center-column">
       <header class="topbar" data-window-drag><button type="button">Window button</button></header>
       <section class="ST7X_W_header"><div class="ST7X_W_titleRow"><span class="ST7X_W_crumbCurrent">会话标题</span><span>操作</span></div><div class="ST7X_W_tabs" role="tablist" data-conversation-tabs><span class="ST7X_W_tab" role="tab" aria-selected="false">对话</span><span class="ST7X_W_tab ST7X_W_tabActive" role="tab" aria-selected="true">轨迹</span></div></section>
       <main data-slot="main">
         <h1>Renderer fixture</h1>
-        <div data-slot="conversation.view"><section class="view-area"><article data-chat-flow-key="fixture" data-chat-flow-kind="user">Chat messages stay above the decorative layer.</article></section></div>
+        <p><span class="fixture-primary">Primary content</span> <span class="fixture-secondary">Secondary content</span> <span class="fixture-tertiary">Tertiary content</span></p>
+        <div data-slot="conversation.view"><section class="view-area"><article data-chat-flow-key="fixture" data-chat-flow-kind="user">Chat messages stay above the decorative layer.</article><article data-chat-flow-kind="assistant-step"><div class="gKv1-q_root"><span>Assistant response</span></div></article><div data-turn-tail><div class="ppByMG_actions"><button class="ppByMG_action">Actions</button><button class="ppByMG_action" data-unavailable>Unavailable</button></div><span class="ppByMG_timeStart">10:00</span><span class="ppByMG_endInfo">10:01</span></div><div class="fixture-file-card"><span class="IzP3Va_fileMeta">Attached file · 12 KB</span></div><div data-composer-stats><span class="OpZ85W_label">Usage information</span><span class="OpZ85W_pill">42 tokens</span><span class="fixture-status-success">Completed</span><span class="fixture-status-error">Failed</span></div><div class="y0jqnG_root"><button class="y0jqnG_trigger" aria-label="15% of context used">15%</button></div></section></div>
         <div class="panel-one">Layer 1 local panel</div>
         <div class="panel-two">Layer 2 local panel</div>
       </main>
-      <div data-composer-card><div data-slot="conversation.composer.bar"><input class="yhfFVG_input" aria-label="Message input" placeholder="Still clickable"><div class="yhfFVG_row"><button class="yhfFVG_primary">Send</button></div></div></div>
+      <div data-composer-card><div data-slot="conversation.composer.bar"><input class="yhfFVG_input" aria-label="Message input" placeholder="Still clickable"><div class="yhfFVG_row"><button class="yhfFVG_primary">Send</button></div></div><span class="placeholder-probe">Ready for a prompt</span></div>
     </div>
   </div>
   <ol id="results" aria-live="polite"></ol>

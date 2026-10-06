@@ -147,24 +147,28 @@ test('readability variables are leased in both modes and preserve later host wri
   t.after(()=>{globalThis.MutationObserver=previous});
   const {doc,win,frames}=setup();
   const html=doc.documentElement;
-  const names=['fill','ink','muted','hover','selected','border'].map(key=>`--dsh-skin-page-${key}`);
+  const names=['fill','ink','muted','hover','selected','border','caption','icon','header','sidebar','content','meta'].map(key=>`--dsh-skin-page-${key}`);
   for(const [i,name] of names.entries())html.style.setProperty(name,`host-${i}`);
   const original=names.map(name=>html.style.getPropertyValue(name));
   const renderer=installRenderer({api:{state:async()=>({presets:[]}),assetUrl:async()=>''},document:doc,window:win});
   const basicWithWallpaper={...preset('basic'),light:{backgroundId:'wallpaper',characterId:null}};
   renderer.apply(basicWithWallpaper);await drain(frames);
+  assert.equal(html.getAttribute('data-dsh-skin-readable'),'light','basic wallpaper gets the shared light-mode protection');
   const light=renderer.getUiTheme(preset('basic').settings,false);
   for(const key of ['fill','ink','muted','hover','selected','border'])assert.equal(html.style.getPropertyValue(`--dsh-skin-page-${key}`),light[`page${key[0].toUpperCase()}${key.slice(1)}`]);
   renderer.apply(preset('refined'));await drain(frames);
+  assert.equal(html.getAttribute('data-dsh-skin-readable'),'light','refined uses the same readability protection');
   const refined=renderer.getUiTheme(preset('refined').settings,false);
   for(const key of ['fill','ink','muted','hover','selected','border'])assert.equal(html.style.getPropertyValue(`--dsh-skin-page-${key}`),refined[`page${key[0].toUpperCase()}${key.slice(1)}`]);
   const darkPreset={...preset('refined'),dark:{backgroundId:'wallpaper',characterId:null}};
   // The renderer follows the host color scheme; change it before applying the dark palette.
   doc.documentElement.className='dark';
   renderer.apply(darkPreset);await drain(frames);
+  assert.equal(html.getAttribute('data-dsh-skin-readable'),null,'light-only protection is released on dark-mode entry');
   const dark=renderer.getUiTheme(preset('refined').settings,true);
   for(const key of ['fill','ink','muted','hover','selected','border'])assert.equal(html.style.getPropertyValue(`--dsh-skin-page-${key}`),dark[`page${key[0].toUpperCase()}${key.slice(1)}`]);
   renderer.apply(null);await drain(frames);
+  assert.equal(html.getAttribute('data-dsh-skin-readable'),null,'disable leaves no light-mode marker');
   assert.deepEqual(names.map(name=>html.style.getPropertyValue(name)),original);
 
   renderer.apply(basicWithWallpaper);await drain(frames);
@@ -196,13 +200,14 @@ test('readability text remains above 4.5:1 over worst-case wallpaper colors',()=
   const rgba=value=>{const parts=value.match(/[\d.]+/g).map(Number);return {rgb:parts.slice(0,3),alpha:parts[3]}};
   const composite=(front,back)=>front.rgb.map((value,index)=>value*front.alpha+back[index]*(1-front.alpha));
   const ratio=(a,b)=>{const hi=Math.max(a,b),lo=Math.min(a,b);return (hi+.05)/(lo+.05)};
-  for(const dark of [false,true]){
-    const theme=installRenderer.getUiTheme({accent:'#D88F9E',uiStyle:'basic'},dark);
-    const surface=rgba(theme.pageFill);
-    const backdrop=dark?[255,255,255]:[0,0,0];
-    const finalSurface=composite(surface,backdrop);
-    for(const key of ['pageInk','pageMuted']){
-      assert.ok(ratio(luminance(hexRgb(theme[key])),luminance(finalSurface))>=4.5,`${dark?'dark':'light'} ${key} meets 4.5:1 over the worst-case wallpaper`);
+  for(const dark of [false,true]) for(const uiStyle of ['basic','refined']) for(const accent of ['#FFFFFF','#000000','#D88F9E','#0000FF']){
+    const theme=installRenderer.getUiTheme({accent,uiStyle,panelOpacity:.3},dark);
+    for(const fill of ['pageFill','pageHeader','pageSidebar','pageContent','pageMeta']){
+      const finalSurface=composite(rgba(theme[fill]),dark?[255,255,255]:[0,0,0]);
+      for(const key of ['pageInk','pageMuted','pageCaption']){
+        assert.ok(ratio(luminance(hexRgb(theme[key])),luminance(finalSurface))>=4.5,`${dark?'dark':'light'} ${uiStyle} ${accent} ${key} on ${fill} meets 4.5:1`);
+      }
+      assert.ok(ratio(luminance(hexRgb(theme.pageIcon)),luminance(finalSurface))>=3,'action icons remain distinguishable');
     }
   }
 });

@@ -33,11 +33,80 @@ const DECORATIONS = 'data-dsh-skin-decorations';
 const BOX_ATTRIBUTE = 'data-dsh-skin-box';
 const LIGHT_SURFACE = '255,255,255';
 const DARK_SURFACE = '28,28,32';
-const READABILITY_VARS = ['fill', 'ink', 'muted', 'hover', 'selected', 'border'].map(key => `--dsh-skin-page-${key}`);
+const READABLE_ATTRIBUTE = 'data-dsh-skin-readable';
+const READABILITY_KEYS = ['fill', 'ink', 'muted', 'hover', 'selected', 'border', 'caption', 'icon', 'header', 'sidebar', 'content', 'meta'];
+const READABILITY_VARS = READABILITY_KEYS.map(key => `--dsh-skin-page-${key}`);
 
 const CSS = `
 html[${SURFACE_ATTRIBUTE}] body {
   ${BASE_TOKEN}: transparent !important;
+}
+/* Readability is shared by basic and refined skins, independent of decoration. */
+html[${SURFACE_ATTRIBUTE}][${READABLE_ATTRIBUTE}="light"] body {
+  --dsw-alias-label-primary: var(--dsh-skin-page-ink) !important;
+  --dsw-alias-label-secondary: var(--dsh-skin-page-muted) !important;
+  --dsw-alias-label-tertiary: var(--dsh-skin-page-caption) !important;
+  --dsw-alias-label-caption: var(--dsh-skin-page-caption) !important;
+  --dsw-specific-sidebar-fill: transparent !important;
+}
+html[${READABLE_ATTRIBUTE}="light"] [data-slot="sidebar"] ._3WPZCG_root {
+  background-color: var(--dsh-skin-page-sidebar) !important;
+}
+html[${READABLE_ATTRIBUTE}="light"] .ST7X_W_header {
+  background-color: var(--dsh-skin-page-header) !important;
+  --dsw-alias-label-primary: var(--dsh-skin-page-ink) !important;
+  --dsw-alias-label-secondary: var(--dsh-skin-page-muted) !important;
+  --dsw-alias-label-tertiary: var(--dsh-skin-page-caption) !important;
+  --dsw-alias-label-caption: var(--dsh-skin-page-caption) !important;
+}
+html[${READABLE_ATTRIBUTE}="light"] [data-slot="sidebar"] ._3WPZCG_panelRow,
+html[${READABLE_ATTRIBUTE}="light"] [data-slot="sidebar"] [role="treeitem"] {
+  color: var(--dsh-skin-page-ink);
+}
+html[${READABLE_ATTRIBUTE}="light"] [data-slot="sidebar"] :is(.jJkEga_time, .jJkEga_projectText) {
+  color: var(--dsh-skin-page-caption) !important;
+}
+html[${READABLE_ATTRIBUTE}="light"] [data-slot="sidebar"] .jJkEga_slot:not(.jJkEga_folderActive) {
+  color: var(--dsh-skin-page-icon);
+}
+/* The assistant's markdown is a painted box; slot anchors are display:contents. */
+html[${READABLE_ATTRIBUTE}="light"] [data-chat-flow-kind="assistant-step"] .gKv1-q_root {
+  background-color: var(--dsh-skin-page-content);
+  color: var(--dsh-skin-page-ink);
+  border-radius: 12px;
+  padding: 12px 16px;
+}
+html[${READABLE_ATTRIBUTE}="light"] [data-turn-tail] :is(.ppByMG_action, .ppByMG_timeStart, .ppByMG_endInfo),
+html[${READABLE_ATTRIBUTE}="light"] [data-composer-stats] .OpZ85W_pill,
+html[${READABLE_ATTRIBUTE}="light"] .y0jqnG_trigger {
+  background-color: var(--dsh-skin-page-meta);
+  border-radius: 8px;
+}
+html[${READABLE_ATTRIBUTE}="light"] [data-turn-tail] :is(.ppByMG_timeStart, .ppByMG_endInfo) { padding: 2px 6px; }
+html[${READABLE_ATTRIBUTE}="light"] :is(.IzP3Va_fileMeta, .ppByMG_timeStart, .ppByMG_timeEnd, .OpZ85W_label) {
+  color: var(--dsh-skin-page-caption) !important;
+}
+html[${READABLE_ATTRIBUTE}="light"] [data-composer-card] {
+  background-color: var(--dsh-skin-page-content) !important;
+  --dsw-alias-label-secondary: var(--dsh-skin-page-muted) !important;
+  --dsw-alias-label-tertiary: var(--dsh-skin-page-caption) !important;
+  --dsw-alias-label-caption: var(--dsh-skin-page-caption) !important;
+}
+html[${READABLE_ATTRIBUTE}="light"] [data-composer-card] :is(input, textarea, [contenteditable="true"]) {
+  color: var(--dsh-skin-page-ink);
+}
+html[${READABLE_ATTRIBUTE}="light"] :is([data-composer-card], [data-plugin-panel], [data-testid="task-manager-page"]) :is(input, textarea)::placeholder {
+  color: var(--dsh-skin-page-caption) !important;
+  opacity: 1;
+}
+html[${READABLE_ATTRIBUTE}="light"] [data-plugin-panel] .ZVcBiW_toolbar,
+html[${READABLE_ATTRIBUTE}="light"] [data-testid="task-manager-page"] .CxUija_pageHeading > h1 {
+  background-color: var(--dsh-skin-page-header);
+  border-radius: 12px;
+  padding: 8px 12px;
+}
+html[${READABLE_ATTRIBUTE}="light"] [data-testid="task-manager-page"] .CxUija_pageHeading > h1 {
+  flex: 0 1 auto;
 }
 /* Verified DSH 0.2.x plugin page anchors; only these local boxes cover the wallpaper. */
 html[${SURFACE_ATTRIBUTE}] [data-plugin-panel],
@@ -192,11 +261,11 @@ html[${UI_STYLE}="refined"] body {
 
 function isDark(doc, media) {
   const html = doc.documentElement;
-  const theme = (html.getAttribute('data-theme') || '').toLowerCase();
+  const theme = (html?.getAttribute('data-theme') || '').toLowerCase();
   if (theme === 'dark' || theme === 'light') return theme === 'dark';
-  if (html.classList.contains('dark')) return true;
-  if (html.classList.contains('light')) return false;
-  const colorScheme = (html.style.colorScheme || '').toLowerCase();
+  if (html?.classList.contains('dark')) return true;
+  if (html?.classList.contains('light')) return false;
+  const colorScheme = (html?.style.colorScheme || '').toLowerCase();
   if (colorScheme === 'dark' || colorScheme === 'light') return colorScheme === 'dark';
   if (doc.body?.hasAttribute('data-ds-dark-theme')) return true;
   return Boolean(media.matches);
@@ -274,6 +343,11 @@ function getUiTheme(settings = {}, dark = false) {
     pageInk: dark ? '#f5f2f3' : '#29272a', pageMuted: dark ? '#e0dde3' : '#535058',
     pageHover: dark ? '#35323b' : '#eeeaf0', pageSelected: dark ? '#48414f' : '#e2dce8',
     pageBorder: dark ? 'rgba(224,221,227,0.35)' : 'rgba(83,80,88,0.35)',
+    pageCaption: dark ? '#e0dde3' : '#535B66', pageIcon: dark ? '#e0dde3' : '#535058',
+    pageHeader: dark ? 'rgba(20,18,24,0.88)' : 'rgba(255,255,255,0.94)',
+    pageSidebar: dark ? 'rgba(20,18,24,0.88)' : 'rgba(255,255,255,0.90)',
+    pageContent: dark ? 'rgba(20,18,24,0.88)' : 'rgba(255,255,255,0.92)',
+    pageMeta: dark ? 'rgba(20,18,24,0.88)' : 'rgba(255,255,255,0.94)',
     accent, brand: `#${brandRgb.map(v=>v.toString(16).padStart(2,'0')).join('')}`, button, buttonHover, hover:`rgba(${rgb.join(',')},.12)`, buttonText:'#FFFFFF',
   };
 }
@@ -306,6 +380,7 @@ export function installRenderer({
   const character = layer.querySelector('.dsh-skin-character');
 
   const originalSurfaceAttribute = html.getAttribute(SURFACE_ATTRIBUTE);
+  const originalReadableAttribute = html.getAttribute(READABLE_ATTRIBUTE);
   const originalSurfaceValue = html.style.getPropertyValue(SURFACE_VALUE);
   const originalPanelValue = html.style.getPropertyValue(PANEL_VALUE);
   const originalUiStyle = html.getAttribute(UI_STYLE);
@@ -363,8 +438,10 @@ export function installRenderer({
     }
   }
 
-  function applyReadability(theme) {
-    for (const key of ['fill', 'ink', 'muted', 'hover', 'selected', 'border']) {
+  function applyReadability(theme, dark) {
+    if (dark) restoreOwnedAttr(READABLE_ATTRIBUTE, originalReadableAttribute);
+    else setOwnedAttr(READABLE_ATTRIBUTE, 'light');
+    for (const key of READABILITY_KEYS) {
       const name = `--dsh-skin-page-${key}`;
       const value = theme[`page${key[0].toUpperCase()}${key.slice(1)}`];
       setStyleValue(html, name, value);
@@ -373,6 +450,7 @@ export function installRenderer({
   }
 
   function releaseReadability() {
+    restoreOwnedAttr(READABLE_ATTRIBUTE, originalReadableAttribute);
     for (const [name, written] of writtenReadabilityVars) {
       restoreStyleValue(html, name, originalReadabilityVars.get(name), written);
     }
@@ -564,7 +642,7 @@ export function installRenderer({
     const opacity = clamp(settings.panelOpacity ?? 0.6, 0, 1, 0.6);
     const palette = getUiTheme({...settings, panelOpacity: opacity}, dark);
     applySurface(palette, refined, settings.decorations !== false);
-    applyReadability(palette);
+    applyReadability(palette, dark);
     syncSlots(refined ? activeSlots() : new Map());
     syncLegacyComposer(settings.accent, refined);
 
@@ -660,5 +738,5 @@ export function installRenderer({
   };
 }
 
-export { BASE_SELECTORS };
+export { BASE_SELECTORS, isDark };
 installRenderer.getUiTheme = getUiTheme;

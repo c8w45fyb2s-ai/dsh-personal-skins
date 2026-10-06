@@ -18,12 +18,13 @@ const api = await includeClientModule('src/client/api.js', [
   ['export function createClientApi(', 'function createClientApi('],
 ]);
 const editor = await includeClientModule('src/client/editor.js', [
+  ["import { isDark } from './renderer.js';\n", ''],
   ['export function mountEditor(', 'function mountEditor('],
   ['\nexport { DEFAULT_SETTINGS };\n', '\n'],
 ]);
 const renderer = await includeClientModule('src/client/renderer.js', [
   ['export function installRenderer(', 'function installRenderer('],
-  ['\nexport { BASE_SELECTORS };\n', '\n'],
+  ['\nexport { BASE_SELECTORS, isDark };\n', '\n'],
 ]);
 const entry = await includeClientModule('src/client/index.js', [
   ["import React from 'react';\n", ''],
