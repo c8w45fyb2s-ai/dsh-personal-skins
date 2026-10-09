@@ -301,8 +301,9 @@ test('editor reloads state when a command adapter does not return a profile', as
 });
 
 function imageFile(name, type, signature) {
-  const bytes = Uint8Array.from(signature);
-  return {name, type, size: bytes.length, slice: () => ({arrayBuffer: async () => bytes.buffer.slice(0)})};
+  const file = new Blob([Uint8Array.from(signature)], {type});
+  Object.defineProperty(file, 'name', {value: name});
+  return file;
 }
 
 test('basic editor follows host theme changes without rerendering or dirtying the draft', async () => {
@@ -450,7 +451,7 @@ test('image cards use keyboard-accessible chooser buttons and reject a confirmed
   await root.querySelector('[data-action="edit"]').dispatch('click');
   root = container.firstElementChild;
   await flush();
-  assert.match(root.innerHTML, /支持 PNG、JPG、WebP，单张不超过 10 MiB/);
+  assert.match(root.innerHTML, /支持 PNG\/APNG、JPG、GIF、WebP，单张不超过 10 MiB/);
   assert.doesNotMatch(root.innerHTML, /Choose File|No file chosen/);
   const backgroundInput = root.querySelector('#upload-background');
   assert.equal(backgroundInput.hasAttribute('hidden'), true);
@@ -460,7 +461,14 @@ test('image cards use keyboard-accessible chooser buttons and reject a confirmed
   assert.ok(root.querySelector('[data-action="clear"][data-kind="character"]'), 'a dark-only legacy character is also available in light mode');
   const chooseBackground = root.querySelector('[data-action="choose-upload"][data-kind="background"]');
   assert.equal(chooseBackground.getAttribute('type'), 'button');
-  assert.equal(chooseBackground.textContent, '选择背景图片');
+  assert.equal(chooseBackground.textContent, '选择背景图片或动图');
+  assert.equal(backgroundInput.getAttribute('aria-label'), '选择背景图片或动图');
+  assert.match(backgroundInput.getAttribute('accept'), /\.png/);
+  assert.match(backgroundInput.getAttribute('accept'), /\.apng/);
+  assert.match(backgroundInput.getAttribute('accept'), /\.jpg/);
+  assert.match(backgroundInput.getAttribute('accept'), /\.jpeg/);
+  assert.match(backgroundInput.getAttribute('accept'), /\.gif/);
+  assert.match(backgroundInput.getAttribute('accept'), /\.webp/);
   await chooseBackground.dispatch('click');
   assert.equal(backgroundInput.clickCount, 1, 'the button opens the matching system file chooser');
   assert.equal(uploadCalls, 0, 'cancelling the chooser does not change the draft or upload');
@@ -479,6 +487,67 @@ test('image cards use keyboard-accessible chooser buttons and reject a confirmed
   dispose();
 });
 
+test('uploads normalize missing GIF MIME and APNG container-signature MIME without changing bytes', async () => {
+  const doc = new FakeDocument(), container = makeContainer(doc), profile = preset();
+  const uploaded = [], previews = [], previousImage = globalThis.Image;
+  const previousCreateObjectURL = URL.createObjectURL, previousRevokeObjectURL = URL.revokeObjectURL;
+  URL.createObjectURL = (blob) => { previews.push(blob); return `blob:upload-${previews.length}`; };
+  URL.revokeObjectURL = () => {};
+  globalThis.Image = class {
+    naturalWidth = 20;
+    naturalHeight = 10;
+    onload = null;
+    onerror = null;
+    set src(value) { this._src = value; queueMicrotask(() => this.onload?.()); }
+  };
+  const dispose = mountEditor(container, {standalone:true,api:{
+    state:async()=>({presets:[profile],activePresetId:null}), assetUrl:async()=>'', onState:()=>()=>{},
+    upload:async file=>{uploaded.push(file);return {id:`asset-${uploaded.length}`};},
+  }});
+  const bytesOf = async blob => [...new Uint8Array(await blob.arrayBuffer())];
+  try {
+    await flush();
+    await container.firstElementChild.querySelector('[data-action="edit"]').dispatch('click');
+    let root = container.firstElementChild;
+    assert.match(root.querySelector('.dsh-upload-limit').textContent, /动图最多 300 帧，累计解码像素不超过 1\.2 亿/);
+    assert.match(root.querySelector('#upload-background').getAttribute('accept'), /image\/gif/);
+    assert.match(root.querySelector('#upload-background').getAttribute('accept'), /image\/apng/);
+
+    const gifBytes = [71,73,70,56,55,97,1,0,1,0,128,0,0,0,0,0,255,255,255,44,0,0,0,0,1,0,1,0,0,2,2,68,1,0,59];
+    root.querySelector('#upload-background').files = [imageFile('animation.gif', '', gifBytes)];
+    await root.querySelector('#upload-background').dispatch('change');
+    root = container.firstElementChild;
+    assert.equal(uploaded[0].type, 'image/gif', 'a valid GIF with empty MIME is uploaded with the canonical GIF MIME');
+    assert.deepEqual(await bytesOf(uploaded[0]), gifBytes, 'MIME normalization preserves the GIF bytes');
+    assert.equal(previews[0].type, 'image/gif', 'the GIF preview uses its canonical MIME');
+
+    const apngContainerSignatureBytes = [137,80,78,71,13,10,26,10, 0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1,8,6,0,0,0,0,0,0,0, 0,0,0,8,97,99,84,76,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0];
+    root.querySelector('#upload-character').files = [imageFile('motion.apng', 'application/octet-stream', apngContainerSignatureBytes)];
+    await root.querySelector('#upload-character').dispatch('change');
+    assert.equal(uploaded[1].type, 'image/apng', 'an APNG container signature with octet-stream MIME is uploaded with APNG MIME');
+    assert.deepEqual(await bytesOf(uploaded[1]), apngContainerSignatureBytes, 'MIME normalization preserves the APNG container-signature mock bytes');
+    assert.equal(previews[1].type, 'image/apng', 'the APNG container-signature preview uses its canonical MIME');
+
+    root = container.firstElementChild;
+    root.querySelector('#upload-background').files = [imageFile('broken.gif', 'image/gif', [71,73,70,56,48,97])];
+    await root.querySelector('#upload-background').dispatch('change');
+    root = container.firstElementChild;
+    assert.match(root.querySelector('[data-upload-state="background"]').textContent, /无法识别图片内容/);
+    assert.equal(uploaded.length, 2, 'a damaged GIF is rejected before upload');
+
+    root.querySelector('#upload-background').files = [imageFile('wrong.gif', 'image/png', gifBytes)];
+    await root.querySelector('#upload-background').dispatch('change');
+    root = container.firstElementChild;
+    assert.match(root.querySelector('[data-upload-state="background"]').textContent, /文件声明的格式与实际图片内容不一致/);
+    assert.equal(uploaded.length, 2, 'a valid GIF with a mismatched declared MIME is rejected');
+  } finally {
+    dispose();
+    globalThis.Image = previousImage;
+    URL.createObjectURL = previousCreateObjectURL;
+    URL.revokeObjectURL = previousRevokeObjectURL;
+  }
+});
+
 test('image upload, thumbnails, failed replacements, and removal share assets across host themes', async () => {
   const doc = new FakeDocument();
   const container = makeContainer(doc);
@@ -488,14 +557,17 @@ test('image upload, thumbnails, failed replacements, and removal share assets ac
   let resolveUpload;
   let uploadedFile = null;
   let failNextUpload = false;
+  let uploadFailureMessage = 'Unsupported image content type or signature';
   let savedPatch;
   const previousImage = globalThis.Image;
   const previousCreateObjectURL = URL.createObjectURL;
   const previousRevokeObjectURL = URL.revokeObjectURL;
   const revoked = [];
-  URL.createObjectURL = () => 'blob:pending-image';
+  let imageDecodes = 0, objectUrlCreations = 0;
+  URL.createObjectURL = () => { objectUrlCreations++; return 'blob:pending-image'; };
   URL.revokeObjectURL = (url) => revoked.push(url);
   globalThis.Image = class {
+    constructor() { imageDecodes++; }
     naturalWidth = 64;
     naturalHeight = 48;
     onload = null;
@@ -511,7 +583,7 @@ test('image upload, thumbnails, failed replacements, and removal share assets ac
         onState: () => () => {},
         update: async (id, patch) => { savedPatch = patch; return {presets:[{...patch,id}],activePresetId:null}; },
         upload: (file) => {
-          if (failNextUpload) { failNextUpload = false; throw new Error('Unsupported image content type or signature'); }
+          if (failNextUpload) { failNextUpload = false; throw new Error(uploadFailureMessage); }
           uploadedFile = file;
           return new Promise((resolve) => { resolveUpload = resolve; });
         },
@@ -534,7 +606,7 @@ test('image upload, thumbnails, failed replacements, and removal share assets ac
     assert.equal(root.querySelector('[data-upload-state="character"]').textContent, '已设置立绘图片');
     assert.equal(root.querySelector('[data-upload-card="background"] .dsh-upload-thumb img').src, 'blob:saved-background', 'dark mode shows the shared background thumbnail');
     assert.equal(root.querySelector('[data-upload-card="character"] h4').textContent, '透明立绘');
-    assert.equal(root.querySelector('[data-action="choose-upload"][data-kind="character"]').textContent, '选择立绘图片');
+    assert.equal(root.querySelector('[data-action="choose-upload"][data-kind="character"]').textContent, '选择立绘图片或动图');
     assert.doesNotMatch(root.querySelector('.dsh-upload-limit').textContent, /透明|背景透明/);
     const input = root.querySelector('#upload-character');
     const file = imageFile('立绘.png', 'image/png', [137, 80, 78, 71, 13, 10, 26, 10]);
@@ -546,11 +618,16 @@ test('image upload, thumbnails, failed replacements, and removal share assets ac
     assert.equal(uploadedFile, file, 'the original File passes through the existing upload method');
     assert.equal(root.querySelector('[data-upload-state="character"]').textContent, '正在上传：立绘.png');
     assert.equal(root.querySelector('[data-action="choose-upload"][data-kind="character"]').disabled, true, 'uploads cannot be started twice');
-    assert.equal(root.querySelector('[data-upload-card="character"] .dsh-upload-thumb img').src, 'blob:pending-image');
+    assert.equal(root.querySelector('[data-upload-card="character"] .dsh-upload-thumb img').src, 'blob:saved-character', 'the current draft image remains while the server checks the upload');
+    assert.equal(objectUrlCreations, 0, 'no temporary preview URL is created before the server accepts the upload');
+    assert.equal(imageDecodes, 0, 'the image is not decoded before the server accepts the upload');
     resolveUpload({id: 'new-character'});
     await pending;
     await flush();
     root = container.firstElementChild;
+    assert.equal(objectUrlCreations, 1, 'the preview URL is created after server acceptance');
+    assert.equal(imageDecodes, 1, 'image decoding starts after server acceptance');
+    assert.equal(root.querySelector('[data-upload-card="character"] .dsh-upload-thumb img').src, 'blob:new-character', 'the accepted upload replaces the draft image after decoding');
     assert.match(root.querySelector('[data-upload-state="character"]').textContent, /立绘\.png：上传完成，保存皮肤后生效/);
     assert.equal(root.querySelector('[data-action="clear"][data-kind="character"]').textContent, '移除图片');
     assert.equal(doc.activeElement.dataset.action, 'choose-upload', 'focus returns to the chooser after upload');
@@ -563,12 +640,33 @@ test('image upload, thumbnails, failed replacements, and removal share assets ac
     failedInput.files = [imageFile('bad-response.png', 'image/png', [137, 80, 78, 71, 13, 10, 26, 10])];
     await failedInput.dispatch('change');
     root = container.firstElementChild;
-    assert.equal(root.querySelector('[data-upload-state="character"]').textContent, '上传未成功，请检查图片格式或网络后重试。');
-    assert.doesNotMatch(root.querySelector('[data-upload-state="character"]').textContent, /Unsupported|signature/);
+    assert.equal(root.querySelector('[data-upload-state="character"]').textContent, 'Unsupported image content type or signature', 'server validation details remain visible when upload fails');
     assert.equal(root.querySelector('[data-upload-card="character"] .dsh-upload-thumb img').src, 'blob:new-character', 'a failed server replacement restores the previous draft thumbnail');
+    assert.equal(objectUrlCreations, 1, 'a rejected server upload does not create a preview URL');
+    assert.equal(imageDecodes, 1, 'a rejected server upload does not decode the image');
     assert.equal(root.querySelector('[data-action="clear"][data-kind="character"]').textContent, '移除图片', 'the previous draft asset id remains set after server failure');
     assert.equal(doc.activeElement.dataset.action, 'choose-upload', 'focus returns to the same chooser after server failure');
     assert.equal(doc.activeElement.dataset.kind, 'character');
+
+    failNextUpload = true;
+    uploadFailureMessage = 'Animation exceeds 300 frames';
+    root.querySelector('#upload-character').files = [imageFile('too-many-frames.gif', 'image/gif', [71,73,70,56,57,97])];
+    await root.querySelector('#upload-character').dispatch('change');
+    root = container.firstElementChild;
+    assert.equal(root.querySelector('[data-upload-state="character"]').textContent, '动图帧数不能超过 300 帧。');
+    assert.equal(objectUrlCreations, 1, 'frame-budget rejection happens before preview creation');
+    assert.equal(imageDecodes, 1, 'frame-budget rejection happens before image decoding');
+    assert.equal(root.querySelector('[data-upload-card="character"] .dsh-upload-thumb img').src, 'blob:new-character', 'frame-budget rejection preserves the draft image');
+
+    failNextUpload = true;
+    uploadFailureMessage = 'Animation exceeds 120 million decoded pixels';
+    root.querySelector('#upload-character').files = [imageFile('too-large-animation.gif', 'image/gif', [71,73,70,56,57,97])];
+    await root.querySelector('#upload-character').dispatch('change');
+    root = container.firstElementChild;
+    assert.equal(root.querySelector('[data-upload-state="character"]').textContent, '动图累计解码像素不能超过 1.2 亿。');
+    assert.equal(objectUrlCreations, 1, 'decoded-pixel-budget rejection happens before preview creation');
+    assert.equal(imageDecodes, 1, 'decoded-pixel-budget rejection happens before image decoding');
+    assert.equal(root.querySelector('[data-upload-card="character"] .dsh-upload-thumb img').src, 'blob:new-character', 'decoded-pixel-budget rejection preserves the draft image');
 
     doc.setTheme(false, 'media');
     await flush();

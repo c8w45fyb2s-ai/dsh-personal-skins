@@ -12,6 +12,7 @@ const toDataKey=name=>name.slice(5).replace(/-([a-z])/g,(_,c)=>c.toUpperCase());
 class FakeElement {
   constructor(tag,doc){this.tagName=tag.toUpperCase();this.ownerDocument=doc;this.attributes=new Map();this.style=new FakeStyle();this.children=[];this.parentElement=null;this.textContent='';}
   set className(v){this.setAttribute('class',v)} get className(){return this.getAttribute('class')||'';}
+  set src(v){this.sourceWrites=(this.sourceWrites||0)+1;this.setAttribute('src',v)} get src(){return this.getAttribute('src')||'';}
   get classList(){return {contains:n=>this.className.split(/\s+/).includes(n)}}
   get dataset(){const out={};for(const [k,v] of this.attributes)if(k.startsWith('data-'))out[toDataKey(k)]=v;return out;}
   get firstElementChild(){return this.children[0]||null;}
@@ -320,4 +321,27 @@ test('sidebar root replacement and message kind changes rescan only supported bo
   await drain(frames);
   assert.equal(message.hasAttribute('data-dsh-skin-box'),false);
   renderer.dispose();
+});
+
+test('refreshes retain animation sources, switching replaces them, and disabling releases both images',async t=>{
+  const previous=globalThis.MutationObserver;globalThis.MutationObserver=FakeObserver;FakeObserver.all=[];
+  t.after(()=>{globalThis.MutationObserver=previous});
+  const {doc,win,frames}=setup();
+  const renderer=installRenderer({api:{state:async()=>({presets:[]}),assetUrl:async id=>id?`blob:${id}`:''},document:doc,window:win});
+  const animation={...preset('basic'),light:{backgroundId:'animation.gif',characterId:'animation.webp'}};
+  renderer.apply(animation);await new Promise(resolve=>setImmediate(resolve));
+  const layer=doc.querySelector('.dsh-skin-layer'), background=layer.querySelector('.dsh-skin-image'), character=layer.querySelector('.dsh-skin-character');
+  const writes=[background.sourceWrites,character.sourceWrites];
+  renderer.refresh();await drain(frames);
+  renderer.apply({...animation,settings:{...animation.settings,backgroundScale:120,characterMirror:true}});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.deepEqual([background.sourceWrites,character.sourceWrites],writes,'host refresh and layout changes do not restart animated images');
+  renderer.apply({...animation,light:{backgroundId:'other.png',characterId:null}});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(background.src,'blob:other.png');assert.equal(character.hasAttribute('src'),false);
+  renderer.apply(null);await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(background.hasAttribute('src'),false);assert.equal(character.hasAttribute('src'),false);
+  renderer.apply(animation);await new Promise(resolve=>setImmediate(resolve));renderer.dispose();
+  assert.equal(background.hasAttribute('src'),false);assert.equal(character.hasAttribute('src'),false);
+  assert.equal(layer.isConnected,false);
 });

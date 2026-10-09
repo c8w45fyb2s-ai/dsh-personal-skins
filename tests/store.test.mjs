@@ -5,27 +5,19 @@ import os from 'node:os';
 import path from 'node:path';
 import { createStore } from '../src/server/store.js';
 import { createDefaultProfile, DEFAULT_SETTINGS, validateProfile } from '../src/shared/model.js';
+import { GIF, APNG, APNG_POSTER, WEBP, WEBP_LOSSY, STATIC_WEBP } from './fixtures/animated-images.mjs';
+import { png } from './fixtures/png.mjs';
 
 async function fixture(t) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'dsh-store-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   return { dir, store: createStore(dir) };
 }
-// Small structurally complete PNG. Pixel bytes and CRCs are intentionally irrelevant to header validation.
-function png(w=1,h=1) {
-  const sig=Buffer.from([137,80,78,71,13,10,26,10]);
-  const chunk=(type,data)=>{const b=Buffer.alloc(12+data.length);b.writeUInt32BE(data.length,0);b.write(type,4);data.copy(b,8);return b;};
-  const ih=Buffer.alloc(13);ih.writeUInt32BE(w);ih.writeUInt32BE(h,4);ih[8]=8;ih[9]=6;
-  return Buffer.concat([sig,chunk('IHDR',ih),chunk('IDAT',Buffer.from([0])),chunk('IEND',Buffer.alloc(0))]);
-}
 function jpeg(w=1,h=1) {
   const sof=Buffer.alloc(19);sof.set([0xff,0xc0,0,17,8]);sof.writeUInt16BE(h,5);sof.writeUInt16BE(w,7);sof[9]=3;
   return Buffer.concat([Buffer.from([0xff,0xd8]),sof,Buffer.from([0xff,0xd9])]);
 }
-function webp(w=1,h=1) {
-  const b=Buffer.alloc(30);b.write('RIFF',0);b.writeUInt32LE(22,4);b.write('WEBP',8);b.write('VP8X',12);b.writeUInt32LE(10,16);
-  b.writeUIntLE(w-1,24,3);b.writeUIntLE(h-1,27,3);return b;
-}
+function webp() { return Buffer.from(STATIC_WEBP); }
 
 test('profile defaults, preset lifecycle, atomic persistence, and copied settings', async t => {
   const {store}=await fixture(t);
@@ -169,4 +161,26 @@ test('serial concurrent mutations retain every preset', async t => {
   const {store}=await fixture(t);
   await Promise.all(Array.from({length:12},(_,i)=>store.createPreset(`p${i}`)));
   assert.equal((await store.read()).presets.length,12);
+});
+
+test('real animations retain original bytes and persist background and character through a fresh store', async t => {
+  const {dir,store}=await fixture(t);
+  for (const [bytes,mime,ext,frames] of [[GIF,'image/gif','gif',3],[APNG,'image/png','png',3],[APNG_POSTER,'image/png','png',2],[WEBP,'image/webp','webp',3],[WEBP_LOSSY,'image/webp','webp',3]]) {
+    const asset=await store.importAsset(bytes);
+    assert.equal(asset.mime,mime); assert.ok(asset.id.endsWith('.'+ext));
+    assert.equal(asset.width,8); assert.equal(asset.height,8);
+    assert.equal(asset.animated,true); assert.equal(asset.frameCount,frames);
+    assert.equal(asset.durationMs,frames===2?560:720);
+    assert.deepEqual(await store.importAsset(bytes),asset,'deduplication preserves animation metadata');
+    const p=(await store.createPreset(ext)).presets.at(-1);
+    await store.updatePreset(p.id,{light:{backgroundId:asset.id,characterId:asset.id}});
+    await store.activatePreset(p.id);
+    const restarted=createStore(dir), profile=await restarted.read();
+    assert.equal(profile.activePresetId,p.id);
+    const saved=profile.presets.find(item=>item.id===p.id);
+    assert.equal(saved.light.backgroundId,asset.id); assert.equal(saved.dark.characterId,asset.id);
+    assert.deepEqual(await restarted.readAsset(asset.id),bytes,'frame timing, transparency and loop bytes are not transcoded');
+    await restarted.activatePreset(null);
+    assert.equal((await restarted.read()).activePresetId,null);
+  }
 });

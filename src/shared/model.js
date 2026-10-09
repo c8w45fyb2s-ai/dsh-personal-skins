@@ -1,4 +1,5 @@
 /** Shared, dependency-free preset model and validation. */
+import { ASSET_ID_RE } from './assets.js';
 
 export const SCHEMA_VERSION = 1;
 
@@ -39,7 +40,7 @@ export function validateProfile(input) {
     const mode = (v, modePath) => {
       if (!plainObject(v)) fail(modePath, 'expected an object');
       for (const key of ['backgroundId', 'characterId']) {
-        if (v[key] !== null && (typeof v[key] !== 'string' || !/^[a-f0-9]{64}\.(?:jpg|png|webp)$/.test(v[key]))) fail(`${modePath}.${key}`, 'invalid asset id');
+        if (v[key] !== null && (typeof v[key] !== 'string' || !ASSET_ID_RE.test(v[key]))) fail(`${modePath}.${key}`, 'invalid asset id');
       }
       return { backgroundId: v.backgroundId, characterId: v.characterId };
     };

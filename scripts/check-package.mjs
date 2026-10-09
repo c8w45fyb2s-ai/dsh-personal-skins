@@ -23,7 +23,7 @@ if (pkg.dsh?.client?.platform !== 'web') fail('dsh.client.platform must be web')
 if (!Array.isArray(pkg.files) || pkg.files.length === 0) fail('package.json must define a non-empty files whitelist');
 for (const item of pkg.files || []) {
   const normalized = String(item).replaceAll('\\', '/').toLowerCase();
-  if (normalized.includes('.local-demo') || /\.(?:png|jpe?g|webp)$/.test(normalized) || normalized === '*' || normalized === '**') fail(`unsafe or overly broad files whitelist entry: ${item}`);
+  if (normalized.includes('.local-demo') || /\.(?:png|jpe?g|webp|gif|apng)$/.test(normalized) || normalized === '*' || normalized === '**') fail(`unsafe or overly broad files whitelist entry: ${item}`);
 }
 for (const [label, file] of [['server entry', pkg.exports?.['.']], ['client bundle entry', pkg.exports?.['./client']]]) {
   if (typeof file === 'string' && !await exists(file)) fail(`${label} is missing: ${file}`);
@@ -91,7 +91,7 @@ else {
     for (const file of listing) {
       const lower = file.path.toLowerCase();
       if (lower.startsWith('.local-demo/') || lower.includes('/.local-demo/')) fail(`local demo data would be published: ${file.path}`);
-      if (/\.(?:png|jpe?g|webp)$/.test(lower)) fail(`raster image would be published; uploaded user assets must stay outside the package: ${file.path}`);
+      if (/\.(?:png|jpe?g|webp|gif|apng)$/.test(lower)) fail(`raster image would be published; uploaded user assets must stay outside the package: ${file.path}`);
     }
   } catch (e) { fail(`could not parse npm pack listing: ${e.message}`); }
 }

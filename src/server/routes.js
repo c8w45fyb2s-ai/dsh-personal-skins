@@ -1,8 +1,10 @@
+import { ASSET_ID_RE, ASSET_MIME } from '../shared/assets.js';
+import { MAX_IMAGE_BYTES, imageSignature } from './media.js';
+
 const PREFIX = '/api/personal-skins';
 const PRESET_RE = /^[a-zA-Z0-9_-]{1,80}$/;
-const ASSET_RE = /^[a-f0-9]{64}\.(?:jpg|png|webp)$/;
 const MAX_JSON = 1024 * 1024;
-const MAX_IMAGE = 10 * 1024 * 1024;
+const MAX_IMAGE = MAX_IMAGE_BYTES;
 
 function jsonResponse(value, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' } });
@@ -38,7 +40,8 @@ async function imageBody(request) {
   const bytes = Buffer.from(await request.arrayBuffer());
   if (bytes.length > MAX_IMAGE) throw bad(413, 'Request body too large');
   const mime = (request.headers.get('content-type') || '').split(';', 1)[0].trim().toLowerCase();
-  const matches = mime === 'image/png' ? bytes.length >= 8 && bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])) : mime === 'image/jpeg' ? bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xd8 : mime === 'image/webp' ? bytes.length >= 12 && bytes.toString('ascii',0,4) === 'RIFF' && bytes.toString('ascii',8,12) === 'WEBP' : false;
+  const actual = imageSignature(bytes);
+  const matches = actual && (mime === actual || (mime === 'image/apng' && actual === 'image/png'));
   if (!matches) throw bad(400, 'Unsupported image content type or signature');
   return bytes;
 }
@@ -81,10 +84,10 @@ export function createFetchRoutes({ store } = {}) {
     }) },
     { path: `${PREFIX}/asset`, methods: ['GET'], requestBody: 'buffered', fetch: wrap(async request => {
       const id = new URL(request.url).searchParams.get('id');
-      if (!id || !ASSET_RE.test(id)) throw bad(400, 'Invalid asset id');
+      if (!id || !ASSET_ID_RE.test(id)) throw bad(400, 'Invalid asset id');
       const bytes = await store.readAsset(id);
       const ext = id.slice(id.lastIndexOf('.') + 1);
-      return new Response(bytes, { status: 200, headers: { 'Content-Type': ({ png: 'image/png', jpg: 'image/jpeg', webp: 'image/webp' })[ext], 'Content-Length': String(bytes.length), 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' } });
+      return new Response(bytes, { status: 200, headers: { 'Content-Type': ASSET_MIME[ext], 'Content-Length': String(bytes.length), 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' } });
     }) },
   ];
 }

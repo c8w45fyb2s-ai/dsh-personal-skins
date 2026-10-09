@@ -650,7 +650,7 @@ export function installRenderer({
     if (disposed || current !== generation) return;
 
     layer.style.visibility = 'visible';
-    if (background) image.src = background;
+    if (background) { if (image.src !== background) image.src = background; }
     else image.removeAttribute('src');
     const scale = clamp(settings.backgroundScale ?? 100, 100, 200, 100);
     const x = clamp(settings.backgroundX ?? 50, 0, 100, 50);
@@ -662,7 +662,7 @@ export function installRenderer({
     layer.style.setProperty('--dsh-overlay', String(clamp(settings.overlay ?? 0.25, 0, 0.9, 0.25)));
 
     if (person) {
-      character.src = person;
+      if (character.src !== person) character.src = person;
       character.style.display = 'block';
     } else {
       character.removeAttribute('src');
@@ -732,6 +732,8 @@ export function installRenderer({
       owned.clear();
       restoreLegacyComposer();
       releaseSurface();
+      image.removeAttribute('src');
+      character.removeAttribute('src');
       layer.remove();
       style.remove();
     },
